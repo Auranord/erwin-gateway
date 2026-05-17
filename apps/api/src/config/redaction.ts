@@ -18,5 +18,9 @@ export const secretRedactionPaths = [
   '*.token',
   '*.secret',
   '*.password',
-  '*.key'
+  '*.key',
+  '*.rawKey',
+  '*.raw_key',
+  'rawKey',
+  'raw_key'
 ];

@@ -35,7 +35,7 @@ export const adminAuditLog = pgTable('admin_audit_log', {
   targetId: text('target_id'),
   metadata: jsonb('metadata').notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
-});
+}, (table) => [index('admin_audit_log_target_idx').on(table.targetType, table.targetId)]);
 
 export const apps = pgTable('apps', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -43,8 +43,35 @@ export const apps = pgTable('apps', {
   slug: varchar('slug', { length: 80 }).notNull(),
   enabled: boolean('enabled').notNull().default(true),
   description: text('description'),
+  permissions: jsonb('permissions_json').$type<string[]>().notNull().default([]),
   ...timestamps
 }, (table) => [uniqueIndex('apps_slug_idx').on(table.slug)]);
+
+export const appApiKeys = pgTable('app_api_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  appId: uuid('app_id').notNull().references(() => apps.id),
+  name: text('name').notNull(),
+  keyPrefix: text('key_prefix').notNull(),
+  keyHash: text('key_hash').notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => [
+  uniqueIndex('app_api_keys_key_prefix_idx').on(table.keyPrefix),
+  index('app_api_keys_app_id_idx').on(table.appId)
+]);
+
+export const appWebhookEndpoints = pgTable('app_webhook_endpoints', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  appId: uuid('app_id').notNull().references(() => apps.id),
+  name: text('name').notNull().default('default'),
+  url: text('url'),
+  enabled: boolean('enabled').notNull().default(false),
+  eventFilters: jsonb('event_filters_json').$type<string[]>().notNull().default([]),
+  secretHash: text('secret_hash'),
+  lastDeliveryAt: timestamp('last_delivery_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => [index('app_webhook_endpoints_app_id_idx').on(table.appId)]);
 
 export const twitchChannels = pgTable('twitch_channels', {
   id: uuid('id').primaryKey().defaultRandom(),

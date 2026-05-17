@@ -5,19 +5,23 @@ import cors from '@fastify/cors';
 import fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import type { Pool } from 'pg';
+import type { Database } from './db/client.js';
 import type { AppConfig } from './config/env.js';
 import { createLogger } from './lib/logger.js';
 import { registerAdminApiRoutes } from './modules/admin/routes.js';
 import { registerHealthRoutes } from './modules/health/routes.js';
+import { registerAppApiRoutes } from './modules/apps/routes.js';
 
 interface BuildAppOptions {
   config: AppConfig;
   pool?: Pool;
+  db?: Database;
 }
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export async function buildApp({ config, pool }: BuildAppOptions) {
+export async function buildApp(options: BuildAppOptions) {
+  const { config, pool } = options;
   const logger = createLogger(config);
   const app = fastify({
     loggerInstance: logger,
@@ -30,7 +34,8 @@ export async function buildApp({ config, pool }: BuildAppOptions) {
   });
 
   await registerHealthRoutes(app, { config, pool });
-  await registerAdminApiRoutes(app);
+  await registerAppApiRoutes(app, { config, db: options.db });
+  await registerAdminApiRoutes(app, { config, db: options.db });
 
   const webDist = path.resolve(dirname, '../../../web/dist');
   const hasWebDist = fs.existsSync(webDist);
