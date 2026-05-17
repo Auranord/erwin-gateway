@@ -5,6 +5,7 @@ import type { Database } from '../../db/client.js';
 import type { HealthResponse } from '@erwin-gateway/shared';
 import { getTwitchSetupStatus } from '../twitch/service.js';
 import { getEventSubDiagnostics } from '../twitch-eventsub/service.js';
+import { getOutgoingChatHealth } from '../twitch-chat/service.js';
 
 interface HealthRouteOptions {
   config: AppConfig;
@@ -65,9 +66,9 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
     const checks: Record<string, unknown> = {
       database: 'not_configured',
       migrations: 'phase_3_twitch_auth_expected',
-      workers: { twitchTokenRefresh: Boolean(options.db) },
+      workers: { twitchTokenRefresh: Boolean(options.db), outgoingChat: Boolean(options.db) },
       eventSub: 'not_checked',
-      queues: 'pending_later_phase'
+      queues: 'not_checked'
     };
 
     let status: HealthResponse['status'] = 'healthy';
@@ -114,6 +115,18 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
           desiredError: eventSub.desiredError
         };
         if (!eventSub.healthy) status = 'degraded';
+
+        const outgoingChat = await getOutgoingChatHealth(options.db);
+        checks.queues = {
+          outgoingChat: {
+            queueDepth: outgoingChat.queueDepth,
+            oldestQueuedAgeSeconds: outgoingChat.oldestQueuedAgeSeconds,
+            lastSuccessfulSend: outgoingChat.lastSuccessfulSend,
+            deadLetterCount: outgoingChat.deadLetterCount
+          }
+        };
+        checks.rateLimitState = outgoingChat.rateLimits;
+        if (outgoingChat.deadLetterCount > 0 || (outgoingChat.oldestQueuedAgeSeconds !== null && outgoingChat.oldestQueuedAgeSeconds > 300)) status = 'degraded';
       } catch (error) {
         checks.twitch = { status: 'degraded', error: error instanceof Error ? error.message : 'unknown Twitch health error' };
         status = 'degraded';

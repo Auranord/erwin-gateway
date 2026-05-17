@@ -411,3 +411,23 @@ code {
 .delivery-row code { display: block; margin-top: 0.25rem; overflow-wrap: anywhere; }
 .delivery-status { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.75rem 0; }
 .button-row input { min-width: 220px; }
+
+select {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.8);
+  color: #e5ecff;
+  padding: 0.7rem 0.8rem;
+  font: inherit;
+}
+
+.json-block {
+  overflow: auto;
+  max-height: 12rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(2, 6, 23, 0.55);
+  color: #bfdbfe;
+  white-space: pre-wrap;
+}
