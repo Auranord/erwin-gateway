@@ -1,0 +1,22 @@
+export const secretRedactionPaths = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers.x-api-key',
+  'req.headers.x-admin-api-key',
+  'req.headers.twitch-eventsub-message-signature',
+  'res.headers.set-cookie',
+  'config.DATABASE_URL',
+  'config.SESSION_SECRET',
+  'config.TOKEN_ENCRYPTION_KEY',
+  'config.API_KEY_PEPPER',
+  'config.INTERNAL_ADMIN_API_KEY',
+  'config.TWITCH_CLIENT_SECRET',
+  'config.TWITCH_EVENTSUB_SECRET',
+  '*.access_token',
+  '*.refresh_token',
+  '*.client_secret',
+  '*.token',
+  '*.secret',
+  '*.password',
+  '*.key'
+];
