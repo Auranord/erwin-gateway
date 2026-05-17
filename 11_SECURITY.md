@@ -1,0 +1,109 @@
+# 11 Security Requirements
+
+## General security rules
+
+- Use Bitwarden or TrueNAS secrets for real deployment secrets.
+- Do not commit secrets.
+- Do not log secrets.
+- Encrypt Twitch tokens at rest.
+- Store app API keys as hashes only.
+- Sign app webhooks.
+- Verify Twitch EventSub signatures using raw request body.
+- Require admin auth for admin UI and admin API.
+- Restrict CORS to configured origins.
+- Validate all payloads with Zod.
+- Use idempotency keys for write endpoints.
+- Audit all admin changes.
+- Audit reward mutations.
+- Audit API key creation/revocation.
+- Use permission checks for every app API route.
+- Enforce reward ownership for update/delete/status actions.
+
+NTKOH account hygiene requires no plain text passwords/secrets in chats or docs, 2FA everywhere, and shared credentials through Bitwarden.
+
+## Secrets that must never be logged
+
+- Twitch client secret
+- Twitch EventSub secret
+- Twitch access token
+- Twitch refresh token
+- App Access Token
+- app API keys
+- webhook secrets
+- OAuth authorization code
+- `Authorization` headers
+- `Cookie` headers
+- session secrets
+- token encryption key
+- API key pepper
+
+## App API key storage
+
+Requirements:
+
+- Show the raw app API key only once.
+- Store only a strong hash.
+- Support key prefixes for lookup.
+- Support multiple keys per app.
+- Support key rotation.
+- Support key revocation.
+- Track last used timestamp.
+- Include audit log entries for key creation/revocation.
+
+Recommended format:
+
+```text
+egw_live_<key_id>_<secret>
+egw_dev_<key_id>_<secret>
+```
+
+## Webhook signing
+
+Use HMAC-SHA256 with a per-app webhook secret.
+
+Headers:
+
+```text
+X-Erwin-Gateway-Delivery-Id
+X-Erwin-Gateway-Event-Id
+X-Erwin-Gateway-Timestamp
+X-Erwin-Gateway-Signature
+X-Erwin-Gateway-App-Id
+```
+
+Signature input:
+
+```text
+delivery_id + timestamp + raw_body
+```
+
+Downstream apps must verify signatures using timing-safe comparison.
+
+## Twitch EventSub signature verification
+
+The gateway must verify Twitch EventSub signatures using the raw request body and Twitch EventSub headers.
+
+Do not parse and re-stringify the JSON before verification.
+
+## Permission checks
+
+Every app-facing API route must check app permissions.
+
+Reward operations must also check ownership:
+
+- read if app has reward read permission
+- create if app has create permission
+- update/delete only if app owns the reward or admin override is used
+- redemption manage only if app owns the reward or has explicit manage permission
+
+## Admin auth
+
+Admin UI must not be public without authentication.
+
+Acceptable MVP options:
+
+- local admin login/session
+- reverse proxy auth plus internal admin API key
+- strong admin API key for early dev
+
+Document whichever option is implemented.
