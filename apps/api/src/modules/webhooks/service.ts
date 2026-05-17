@@ -90,6 +90,9 @@ function matchesFilters(filters: string[], type: string) { return filters.length
 function appCanReceive(app: typeof apps.$inferSelect, type: string, payload: any) {
   if (type === 'twitch.chat.message') return payload?.chat?.is_command ? app.permissions.includes('chat:commands:receive') : app.permissions.includes('chat:messages:receive');
   if (type === 'twitch.channel_points.custom_reward_redemption.add' || type === 'twitch.channel_points.custom_reward_redemption.update') return app.permissions.includes('channel_points:events:receive') || app.permissions.includes('events:receive_twitch_events');
+  if (type.startsWith('twitch.channel.subscription') || type === 'twitch.channel.subscribe') return app.permissions.includes('subscriptions:read') || app.permissions.includes('events:receive_twitch_events');
+  if (type === 'twitch.channel.cheer') return app.permissions.includes('bits:read') || app.permissions.includes('events:receive_twitch_events');
+  if (type === 'twitch.stream.online' || type === 'twitch.stream.offline' || type === 'twitch.channel.update') return app.permissions.includes('streams:read') || app.permissions.includes('events:receive_twitch_events');
   return app.permissions.includes('events:receive_twitch_events');
 }
 

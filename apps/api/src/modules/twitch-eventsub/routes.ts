@@ -5,6 +5,7 @@ import { enqueueEventFromNotification, getEventSubDiagnostics, persistEventSubMe
 import { verifyEventSubSignature } from './signature.js';
 import { normalizeChatMessageEvent } from '../webhooks/service.js';
 import { normalizeChannelPointRedemptionEvent } from '../channel-points/service.js';
+import { normalizeTwitchDataEvent } from '../twitch-data.js';
 
 interface EventSubRouteOptions {
   config: AppConfig;
@@ -75,6 +76,7 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
       await enqueueEventFromNotification(options.db, messageId, payload);
       await normalizeChatMessageEvent(options.db, { rawMessageId: messageId, rawEventsubMessageId: persisted.row?.id ?? null, payload });
       await normalizeChannelPointRedemptionEvent(options.db, { rawMessageId: messageId, rawEventsubMessageId: persisted.row?.id ?? null, payload });
+      await normalizeTwitchDataEvent(options.db, { rawMessageId: messageId, rawEventsubMessageId: persisted.row?.id ?? null, payload });
       return reply.code(204).send();
     }
 

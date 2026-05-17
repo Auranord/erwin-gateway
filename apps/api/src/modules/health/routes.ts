@@ -7,6 +7,7 @@ import { getTwitchSetupStatus } from '../twitch/service.js';
 import { getEventSubDiagnostics } from '../twitch-eventsub/service.js';
 import { getOutgoingChatHealth } from '../twitch-chat/service.js';
 import { channelPointDiagnostics } from '../channel-points/service.js';
+import { twitchDataDiagnostics } from '../twitch-data.js';
 
 interface HealthRouteOptions {
   config: AppConfig;
@@ -52,7 +53,7 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         ...baseHealth(options.config, ready ? 'ready' : 'degraded'),
         checks: {
           database,
-          migrations: 'phase_8_channel_points_expected',
+          migrations: 'phase_9_twitch_data_expected',
           workers: 'twitch_token_worker_registered',
           twitchAuth: twitch?.status ?? 'not_configured'
         }
@@ -66,7 +67,7 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
   app.get('/api/v1/health/deep', async (request, reply) => {
     const checks: Record<string, unknown> = {
       database: 'not_configured',
-      migrations: 'phase_8_channel_points_expected',
+      migrations: 'phase_9_twitch_data_expected',
       workers: { twitchTokenRefresh: Boolean(options.db), outgoingChat: Boolean(options.db) },
       eventSub: 'not_checked',
       queues: 'not_checked'
@@ -137,6 +138,17 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
           twitchRewardsMissingOwnershipMapping: channelPoints.twitchRewardsMissingOwnershipMapping,
           notes: channelPoints.notes
         };
+        const twitchData = await twitchDataDiagnostics(options.db);
+        checks.twitchData = {
+          missingChannelReadSubscriptions: (twitch.broadcaster.missingScopes as string[]).includes('channel:read:subscriptions'),
+          missingBitsRead: (twitch.broadcaster.missingScopes as string[]).includes('bits:read'),
+          lastSubscriptionEvent: twitchData.lastSubscriptionEvent,
+          lastBitsEvent: twitchData.lastBitsEvent,
+          lastStreamStatusCheck: twitchData.lastStreamStatusCheck,
+          lastBackfillRuns: twitchData.lastBackfillRuns,
+          backfillFailures: twitchData.backfillFailures
+        };
+        if ((twitch.broadcaster.missingScopes as string[]).includes('channel:read:subscriptions') || (twitch.broadcaster.missingScopes as string[]).includes('bits:read')) status = 'degraded';
         if (outgoingChat.deadLetterCount > 0 || (outgoingChat.oldestQueuedAgeSeconds !== null && outgoingChat.oldestQueuedAgeSeconds > 300)) status = 'degraded';
       } catch (error) {
         checks.twitch = { status: 'degraded', error: error instanceof Error ? error.message : 'unknown Twitch health error' };
