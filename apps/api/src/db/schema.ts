@@ -130,6 +130,67 @@ export const diagnosticEvents = pgTable('diagnostic_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 }, (table) => [index('diagnostic_events_created_at_idx').on(table.createdAt)]);
 
+export const twitchEventsubSubscriptions = pgTable('twitch_eventsub_subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  twitchSubscriptionId: text('twitch_subscription_id'),
+  type: text('type').notNull(),
+  version: varchar('version', { length: 16 }).notNull(),
+  condition: jsonb('condition_json').$type<Record<string, string>>().notNull().default({}),
+  callbackUrl: text('callback_url').notNull(),
+  status: varchar('status', { length: 64 }).notNull().default('desired'),
+  transportMethod: varchar('transport_method', { length: 32 }).notNull().default('webhook'),
+  cost: integer('cost'),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokeReason: text('revoke_reason'),
+  lastError: text('last_error'),
+  ...timestamps
+}, (table) => [
+  uniqueIndex('twitch_eventsub_subscriptions_twitch_id_idx').on(table.twitchSubscriptionId),
+  uniqueIndex('twitch_eventsub_subscriptions_desired_idx').on(table.type, table.version, table.condition),
+  index('twitch_eventsub_subscriptions_status_idx').on(table.status)
+]);
+
+export const twitchEventsubMessages = pgTable('twitch_eventsub_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  messageId: text('message_id').notNull(),
+  messageType: varchar('message_type', { length: 64 }).notNull(),
+  subscriptionType: text('subscription_type'),
+  subscriptionVersion: varchar('subscription_version', { length: 16 }),
+  twitchSubscriptionId: text('twitch_subscription_id'),
+  eventType: text('event_type'),
+  payload: jsonb('payload').notNull().default({}),
+  headers: jsonb('headers').notNull().default({}),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  duplicate: boolean('duplicate').notNull().default(false)
+}, (table) => [
+  uniqueIndex('twitch_eventsub_messages_message_id_idx').on(table.messageId),
+  index('twitch_eventsub_messages_received_at_idx').on(table.receivedAt),
+  index('twitch_eventsub_messages_event_type_idx').on(table.eventType)
+]);
+
+export const events = pgTable('events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  source: varchar('source', { length: 64 }).notNull(),
+  type: text('type').notNull(),
+  externalId: text('external_id'),
+  channelId: uuid('channel_id').references(() => twitchChannels.id),
+  twitchMessageId: text('twitch_message_id'),
+  twitchSubscriptionId: text('twitch_subscription_id'),
+  payload: jsonb('payload').notNull().default({}),
+  status: varchar('status', { length: 32 }).notNull().default('queued'),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  ...timestamps
+}, (table) => [
+  uniqueIndex('events_external_id_source_idx').on(table.source, table.externalId),
+  index('events_status_idx').on(table.status),
+  index('events_type_idx').on(table.type),
+  index('events_occurred_at_idx').on(table.occurredAt)
+]);
+
 export const healthCheckSnapshots = pgTable('health_check_snapshots', {
   id: uuid('id').primaryKey().defaultRandom(),
   status: varchar('status', { length: 32 }).notNull(),

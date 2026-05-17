@@ -380,3 +380,28 @@ code {
   background: rgba(127, 29, 29, 0.35);
   border-color: rgba(248, 113, 113, 0.45);
 }
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.diagnostic-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.eventsub.degraded {
+  border-left: 4px solid #f97316;
+  padding-left: 1rem;
+}
+
+.eventsub.healthy {
+  border-left: 4px solid #22c55e;
+  padding-left: 1rem;
+}

@@ -222,6 +222,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
       permissions
     }).returning();
 
+    if (!created) return reply.code(500).send({ error: 'App was not created' });
     await upsertDefaultWebhook(options.db, created.id, parsed.data.webhookUrl, parsed.data.webhookEventFilters);
     await audit(options.db, 'app.create', 'app', created.id, { slug: created.slug, permissions });
 
@@ -294,6 +295,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
       keyHash: generated.keyHash
     }).returning();
 
+    if (!createdKey) return reply.code(500).send({ error: 'API key was not created' });
     await audit(options.db, 'app_api_key.create', 'app_api_key', createdKey.id, {
       appId: record.id,
       keyPrefix: generated.keyPrefix
