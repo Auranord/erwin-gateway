@@ -16,6 +16,8 @@ type Webhook = {
   url: string;
   enabled: boolean;
   eventFilters: string[];
+  lastDeliveryAt: string | null;
+  signingSecretConfigured: boolean;
 };
 
 
@@ -52,6 +54,10 @@ type TwitchSetupStatus = {
   broadcaster: TwitchAccountStatus;
   degradedReasons: string[];
 };
+
+type ChatMessage = { id: string; chatterLogin: string | null; chatterDisplayName: string | null; text: string; isCommand: boolean; commandName: string | null; isBroadcaster: boolean; isMod: boolean; isVip: boolean; isSubscriber: boolean; createdAt: string; };
+
+type WebhookDelivery = { id: string; appId: string; endpointId: string; eventId: string; status: string; attempts: number; nextAttemptAt: string; lastError: string | null; deliveredAt: string | null; createdAt: string; };
 
 type RegisteredApp = {
   id: string;
@@ -113,6 +119,9 @@ function App() {
   const [newRawKey, setNewRawKey] = useState<string | null>(null);
   const [twitchStatus, setTwitchStatus] = useState<TwitchSetupStatus | null>(null);
   const [eventSubStatus, setEventSubStatus] = useState<EventSubStatus | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatSearch, setChatSearch] = useState('');
+  const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
   const [form, setForm] = useState({
@@ -173,7 +182,49 @@ function App() {
   useEffect(() => {
     void loadApps();
     void loadTwitchStatus();
+    void loadChatLog().catch((loadError) => setError(String(loadError)));
+    void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
   }, []);
+
+  async function loadChatLog(search = chatSearch) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (search) params.set('q', search);
+    const response = await fetch(`/api/admin/chat/log?${params}`, { headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Chat log API returned ${response.status}`);
+    const payload = await response.json();
+    setChatMessages(payload.messages ?? []);
+  }
+
+  async function loadWebhookDeliveries() {
+    const response = await fetch('/api/admin/webhook-deliveries?limit=100', { headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Webhook deliveries API returned ${response.status}`);
+    const payload = await response.json();
+    setWebhookDeliveries(payload.deliveries ?? []);
+  }
+
+  async function retryWebhookDelivery(deliveryId: string) {
+    const response = await fetch(`/api/admin/webhook-deliveries/${deliveryId}/retry`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
+    if (!response.ok) throw new Error(`Retry delivery failed with ${response.status}`);
+    await loadWebhookDeliveries();
+  }
+
+
+
+  async function rotateWebhookSecret(appId: string) {
+    const response = await fetch(`/api/admin/apps/${appId}/webhook-secret`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
+    if (!response.ok) throw new Error(`Webhook secret rotation failed with ${response.status}`);
+    const payload = await response.json();
+    window.alert(`Copy this webhook signing secret now; it will not be shown again:\n\n${payload.rawSecret}`);
+    await loadApps();
+  }
+
+  async function testAppWebhook(appId: string) {
+    const response = await fetch(`/api/admin/apps/${appId}/webhook-test`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
+    if (!response.ok) throw new Error(`Webhook test failed with ${response.status}`);
+    await loadWebhookDeliveries();
+    await loadApps();
+  }
+
 
   async function createApp() {
     const response = await fetch('/api/admin/apps', {
@@ -399,6 +450,12 @@ function App() {
                   </label>
                 </div>
 
+                <div className="delivery-status">
+                  <span>Delivery status: {registeredApp.webhook.enabled ? `enabled · last ${registeredApp.webhook.lastDeliveryAt ?? 'never'}` : 'disabled'}</span>
+                  <button onClick={() => void rotateWebhookSecret(registeredApp.id).catch((secretError) => setError(String(secretError)))}>Rotate signing secret</button>
+                  <button onClick={() => void testAppWebhook(registeredApp.id).catch((testError) => setError(String(testError)))}>Send test webhook</button>
+                </div>
+
                 <div className="keys-heading">
                   <strong>API keys</strong>
                   <button onClick={() => void generateKey(registeredApp).catch((keyError) => setError(String(keyError)))}>Generate API key</button>
@@ -459,7 +516,57 @@ function App() {
           ) : <p>EventSub diagnostics have not loaded yet.</p>}
         </section>
 
-        {pages.filter((page) => page !== 'Dashboard' && page !== 'Apps' && page !== 'Twitch Setup' && page !== 'Diagnostics').map((page) => (
+        <section className="page-card" id="chat-log">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Chat archive</p>
+              <h2>Chat Log</h2>
+            </div>
+            <div className="button-row">
+              <input placeholder="Search chat text" value={chatSearch} onChange={(event) => setChatSearch(event.target.value)} />
+              <button onClick={() => void loadChatLog().catch((loadError) => setError(String(loadError)))}>Search</button>
+            </div>
+          </div>
+          <div className="table-list">
+            {chatMessages.map((message) => (
+              <article className="log-row" key={message.id}>
+                <div><strong>{message.chatterDisplayName ?? message.chatterLogin ?? 'unknown'}</strong> <span>{new Date(message.createdAt).toLocaleString()}</span></div>
+                <p>{message.text}</p>
+                <div className="chips">
+                  {message.isCommand ? <span>!{message.commandName}</span> : <span>message</span>}
+                  {message.isBroadcaster ? <span>broadcaster</span> : null}
+                  {message.isMod ? <span>mod</span> : null}
+                  {message.isVip ? <span>vip</span> : null}
+                  {message.isSubscriber ? <span>subscriber</span> : null}
+                </div>
+              </article>
+            ))}
+            {chatMessages.length === 0 ? <p>No chat messages match the current search.</p> : null}
+          </div>
+        </section>
+
+        <section className="page-card" id="webhook-deliveries">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Fanout reliability</p>
+              <h2>Webhook Deliveries</h2>
+            </div>
+            <button onClick={() => void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)))}>Refresh deliveries</button>
+          </div>
+          <div className="table-list">
+            {webhookDeliveries.map((delivery) => (
+              <article className="delivery-row" key={delivery.id}>
+                <div><strong>{delivery.status}</strong> <code>{delivery.id}</code></div>
+                <p>event {delivery.eventId} · attempts {delivery.attempts} · next {delivery.nextAttemptAt}</p>
+                {delivery.lastError ? <p className="error">{delivery.lastError}</p> : null}
+                <button onClick={() => void retryWebhookDelivery(delivery.id).catch((retryError) => setError(String(retryError)))}>Retry</button>
+              </article>
+            ))}
+            {webhookDeliveries.length === 0 ? <p>No webhook deliveries recorded yet.</p> : null}
+          </div>
+        </section>
+
+        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Diagnostics', 'Chat Log', 'Webhook Deliveries'].includes(page)).map((page) => (
           <section className="page-card placeholder" id={page.toLowerCase().replaceAll(' ', '-')} key={page}>
             <h2>{page}</h2>
             <p>Operational controls for this area arrive in later phases.</p>

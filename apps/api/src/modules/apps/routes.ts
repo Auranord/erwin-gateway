@@ -3,6 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
 import { appApiKeys, apps } from '../../db/schema.js';
+import { deliverWebhookNow, getEvent, getWebhookDeliveryWithAttempts, listChatLog, listEvents, listWebhookDeliveries } from '../webhooks/service.js';
+import { z } from 'zod';
 import { extractKeyPrefix, hashAppApiKey, safeCompareHashes } from './api-keys.js';
 
 interface AppRouteOptions {
@@ -115,4 +117,53 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
       apiKey: authenticatedApp.apiKey
     };
   });
+
+  app.get('/api/v1/events', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const query = z.object({ type: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    return { events: await listEvents(options.db, query.data) };
+  });
+
+  app.get('/api/v1/events/:eventId', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const params = z.object({ eventId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid event id' });
+    const event = await getEvent(options.db, params.data.eventId);
+    if (!event) return reply.code(404).send({ error: 'Event not found' });
+    return { event };
+  });
+
+  app.get('/api/v1/chat/log', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const query = z.object({ q: z.string().optional(), command: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    return { messages: await listChatLog(options.db, query.data) };
+  });
+
+  app.get('/api/v1/webhook-deliveries', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const query = z.object({ status: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    return { deliveries: await listWebhookDeliveries(options.db, query.data) };
+  });
+
+  app.get('/api/v1/webhook-deliveries/:deliveryId', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const params = z.object({ deliveryId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid delivery id' });
+    const result = await getWebhookDeliveryWithAttempts(options.db, params.data.deliveryId);
+    if (!result) return reply.code(404).send({ error: 'Delivery not found' });
+    return result;
+  });
+
+  app.post('/api/v1/webhook-deliveries/:deliveryId/retry', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const params = z.object({ deliveryId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid delivery id' });
+    const delivery = await deliverWebhookNow(options.db, params.data.deliveryId, true);
+    if (!delivery) return reply.code(404).send({ error: 'Delivery not found' });
+    return { delivery };
+  });
+
 }
