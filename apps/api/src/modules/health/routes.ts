@@ -6,6 +6,7 @@ import type { HealthResponse } from '@erwin-gateway/shared';
 import { getTwitchSetupStatus } from '../twitch/service.js';
 import { getEventSubDiagnostics } from '../twitch-eventsub/service.js';
 import { getOutgoingChatHealth } from '../twitch-chat/service.js';
+import { channelPointDiagnostics } from '../channel-points/service.js';
 
 interface HealthRouteOptions {
   config: AppConfig;
@@ -51,7 +52,7 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         ...baseHealth(options.config, ready ? 'ready' : 'degraded'),
         checks: {
           database,
-          migrations: 'phase_3_twitch_auth_expected',
+          migrations: 'phase_8_channel_points_expected',
           workers: 'twitch_token_worker_registered',
           twitchAuth: twitch?.status ?? 'not_configured'
         }
@@ -65,7 +66,7 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
   app.get('/api/v1/health/deep', async (request, reply) => {
     const checks: Record<string, unknown> = {
       database: 'not_configured',
-      migrations: 'phase_3_twitch_auth_expected',
+      migrations: 'phase_8_channel_points_expected',
       workers: { twitchTokenRefresh: Boolean(options.db), outgoingChat: Boolean(options.db) },
       eventSub: 'not_checked',
       queues: 'not_checked'
@@ -126,6 +127,16 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
           }
         };
         checks.rateLimitState = outgoingChat.rateLimits;
+
+        const channelPoints = await channelPointDiagnostics(options.db);
+        checks.channelPoints = {
+          missingChannelManageRedemptions: (twitch.broadcaster.missingScopes as string[]).includes('channel:manage:redemptions'),
+          lastRewardSync: channelPoints.lastRewardSync,
+          lastRedemptionEvent: channelPoints.lastRedemptionEvent,
+          rewardsMissingOnTwitch: channelPoints.rewardsMissingOnTwitch,
+          twitchRewardsMissingOwnershipMapping: channelPoints.twitchRewardsMissingOwnershipMapping,
+          notes: channelPoints.notes
+        };
         if (outgoingChat.deadLetterCount > 0 || (outgoingChat.oldestQueuedAgeSeconds !== null && outgoingChat.oldestQueuedAgeSeconds > 300)) status = 'degraded';
       } catch (error) {
         checks.twitch = { status: 'degraded', error: error instanceof Error ? error.message : 'unknown Twitch health error' };

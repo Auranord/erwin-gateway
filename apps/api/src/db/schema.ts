@@ -272,6 +272,87 @@ export const outgoingChatAttempts = pgTable('outgoing_chat_attempts', {
 ]);
 
 
+export const twitchChannelPointRewards = pgTable('twitch_channel_point_rewards', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  twitchRewardId: text('twitch_reward_id').notNull(),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  owningAppId: uuid('owning_app_id').references(() => apps.id),
+  appOwnershipKey: text('app_ownership_key'),
+  title: text('title').notNull(),
+  cost: integer('cost').notNull(),
+  prompt: text('prompt'),
+  enabled: boolean('enabled').notNull().default(true),
+  manageable: boolean('manageable').notNull().default(false),
+  backgroundColor: text('background_color'),
+  isUserInputRequired: boolean('is_user_input_required').notNull().default(false),
+  limits: jsonb('limits_json').$type<Record<string, unknown>>().notNull().default({}),
+  rawPayload: jsonb('raw_payload_json').notNull().default({}),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true })
+}, (table) => [
+  uniqueIndex('twitch_channel_point_rewards_twitch_id_idx').on(table.twitchRewardId),
+  index('twitch_channel_point_rewards_channel_idx').on(table.channelId),
+  index('twitch_channel_point_rewards_owning_app_idx').on(table.owningAppId),
+  index('twitch_channel_point_rewards_deleted_idx').on(table.deletedAt)
+]);
+
+export const twitchChannelPointRedemptions = pgTable('twitch_channel_point_redemptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  twitchRedemptionId: text('twitch_redemption_id').notNull(),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  rewardId: uuid('reward_id').references(() => twitchChannelPointRewards.id),
+  twitchRewardId: text('twitch_reward_id').notNull(),
+  userId: text('user_id'),
+  userLogin: text('user_login'),
+  userDisplayName: text('user_display_name'),
+  status: varchar('status', { length: 32 }).notNull(),
+  userInput: text('user_input'),
+  redeemedAt: timestamp('redeemed_at', { withTimezone: true }).notNull(),
+  fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+  canceledAt: timestamp('canceled_at', { withTimezone: true }),
+  rawPayload: jsonb('raw_payload_json').notNull().default({}),
+  rawEventId: uuid('raw_event_id').references(() => twitchEventsubMessages.id),
+  eventId: uuid('event_id').references(() => events.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex('twitch_channel_point_redemptions_twitch_id_idx').on(table.twitchRedemptionId),
+  index('twitch_channel_point_redemptions_reward_idx').on(table.rewardId),
+  index('twitch_channel_point_redemptions_channel_idx').on(table.channelId, table.redeemedAt),
+  index('twitch_channel_point_redemptions_status_idx').on(table.status)
+]);
+
+export const appChannelPointRewardBindings = pgTable('app_channel_point_reward_bindings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  appId: uuid('app_id').notNull().references(() => apps.id),
+  rewardId: uuid('reward_id').notNull().references(() => twitchChannelPointRewards.id),
+  permission: varchar('permission', { length: 32 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex('app_channel_point_reward_bindings_app_reward_idx').on(table.appId, table.rewardId),
+  index('app_channel_point_reward_bindings_reward_idx').on(table.rewardId)
+]);
+
+export const rewardSyncRuns = pgTable('reward_sync_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  requestedByAppId: uuid('requested_by_app_id').references(() => apps.id),
+  status: varchar('status', { length: 32 }).notNull().default('running'),
+  rewardsSeen: integer('rewards_seen').notNull().default(0),
+  rewardsCreated: integer('rewards_created').notNull().default(0),
+  rewardsUpdated: integer('rewards_updated').notNull().default(0),
+  rewardsMissingOwnership: integer('rewards_missing_ownership').notNull().default(0),
+  error: text('error'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true })
+}, (table) => [
+  index('reward_sync_runs_channel_started_idx').on(table.channelId, table.startedAt),
+  index('reward_sync_runs_status_idx').on(table.status)
+]);
+
+
 export const textCommands = pgTable('text_commands', {
   id: uuid('id').primaryKey().defaultRandom(),
   channelId: uuid('channel_id').references(() => twitchChannels.id),

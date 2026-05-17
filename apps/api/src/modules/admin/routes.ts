@@ -3,13 +3,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
-import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints, events, webhookDeliveries } from '../../db/schema.js';
+import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints, events, twitchChannelPointRewards, webhookDeliveries } from '../../db/schema.js';
 import { archiveTextCommand, createTextCommand, getTextCommand, listTextCommandInvocations, listTextCommands, testTextCommand, textCommandReplyModes, textCommandRoles, updateTextCommand } from '../text-commands/service.js';
 import { generateAppApiKey } from '../apps/api-keys.js';
 import { appPermissions, defaultAppPermissions, normalizePermissions } from '../apps/permissions.js';
 import { registerTwitchAdminRoutes } from '../twitch/routes.js';
 import { getOutgoingChatMessage, listOutgoingChatMessages, retryOutgoingChatMessage } from '../twitch-chat/service.js';
 import { deliverWebhookNow, generateWebhookSecret, getWebhookDeliveryWithAttempts, listChatLog, listWebhookDeliveries } from '../webhooks/service.js';
+import { channelPointDiagnostics, createReward, deleteReward, listRedemptions, listRewards, syncRewards, updateReward } from '../channel-points/service.js';
 
 const adminPages = [
   'Dashboard',
@@ -491,6 +492,75 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     const delivery = await deliverWebhookNow(options.db, params.data.deliveryId, true);
     if (!delivery) return reply.code(404).send({ error: 'Delivery not found' });
     return { delivery };
+  });
+
+
+  const adminChannelPointApp = { id: '00000000-0000-0000-0000-000000000000', slug: 'admin', permissions: ['channel_points:rewards:read', 'channel_points:rewards:create', 'channel_points:rewards:update', 'channel_points:rewards:delete', 'channel_points:redemptions:read', 'channel_points:redemptions:manage', 'channel_points:events:receive'] };
+  const adminRewardPayloadSchema = z.object({
+    title: z.string().min(1).max(45).optional(),
+    cost: z.number().int().min(1).max(1_000_000_000).optional(),
+    prompt: z.string().max(200).optional().nullable(),
+    owning_app_id: z.string().uuid().optional(),
+    is_enabled: z.boolean().optional(),
+    background_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+    is_user_input_required: z.boolean().optional(),
+    should_redemptions_skip_request_queue: z.boolean().optional()
+  });
+
+  app.get('/api/admin/channel-points', async (_request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const rewards = await listRewards(options.db, adminChannelPointApp, { includeDeleted: true });
+    const redemptions = await listRedemptions(options.db, adminChannelPointApp, { limit: 25 });
+    return { rewards: rewards.ok ? rewards.rewards : [], redemptions: redemptions.ok ? redemptions.redemptions : [], diagnostics: await channelPointDiagnostics(options.db) };
+  });
+
+  app.post('/api/admin/channel-points/rewards/sync', async (_request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const result = await syncRewards(options.db, options.config, null);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    await audit(options.db, 'channel_points.rewards.sync', 'channel_point_reward', 'all', { runId: result.run.id });
+    return { run: result.run, rewards: result.rewards };
+  });
+
+  app.post('/api/admin/channel-points/rewards', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const body = adminRewardPayloadSchema.extend({ title: z.string().min(1).max(45), cost: z.number().int().min(1).max(1_000_000_000) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: 'Invalid reward payload', issues: body.error.issues });
+    const [owner] = body.data.owning_app_id
+      ? await options.db.select().from(apps).where(eq(apps.id, body.data.owning_app_id)).limit(1)
+      : await options.db.select().from(apps).where(eq(apps.slug, 'erwin-hatchery')).limit(1);
+    if (!owner) return reply.code(400).send({ error: 'An owning app is required for admin reward creation' });
+    const ownerApp = { id: owner.id, slug: owner.slug, permissions: adminChannelPointApp.permissions };
+    const result = await createReward(options.db, options.config, ownerApp, body.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    await audit(options.db, 'channel_points.reward.create_admin_override', 'channel_point_reward', result.reward.id, { explicitAdminOverride: true });
+    return reply.code(201).send({ reward: result.reward });
+  });
+
+  app.patch('/api/admin/channel-points/rewards/:rewardId', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ rewardId: z.string().uuid() }).safeParse(request.params);
+    const body = adminRewardPayloadSchema.safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid reward id' });
+    if (!body.success) return reply.code(400).send({ error: 'Invalid reward payload', issues: body.error.issues });
+    const [reward] = await options.db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.id, params.data.rewardId)).limit(1);
+    const overrideApp = { ...adminChannelPointApp, id: reward?.owningAppId ?? adminChannelPointApp.id };
+    const result = await updateReward(options.db, options.config, overrideApp, params.data.rewardId, body.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    await audit(options.db, 'channel_points.reward.update_admin_override', 'channel_point_reward', params.data.rewardId, { explicitAdminOverride: true });
+    return { reward: result.reward };
+  });
+
+  app.delete('/api/admin/channel-points/rewards/:rewardId', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ rewardId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid reward id' });
+    const [reward] = await options.db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.id, params.data.rewardId)).limit(1);
+    const overrideApp = { ...adminChannelPointApp, id: reward?.owningAppId ?? adminChannelPointApp.id };
+    const result = await deleteReward(options.db, options.config, overrideApp, params.data.rewardId);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    await audit(options.db, 'channel_points.reward.delete_admin_override', 'channel_point_reward', params.data.rewardId, { explicitAdminOverride: true });
+    return { reward: result.reward };
   });
 
   await registerTwitchAdminRoutes(app, options);

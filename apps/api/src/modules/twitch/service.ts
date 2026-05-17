@@ -277,6 +277,27 @@ export async function refreshExpiringTokens(db: Database, config: AppConfig) {
   }
 }
 
+export async function getUserAccessToken(db: Database, config: AppConfig, role: TwitchAccountRole) {
+  requireClientConfig(config);
+  const [row] = await db.select({ account: twitchAccounts, token: twitchTokens })
+    .from(twitchAccounts)
+    .innerJoin(twitchTokens, eq(twitchTokens.accountId, twitchAccounts.id))
+    .where(eq(twitchAccounts.role, role))
+    .limit(1);
+  if (!row) throw new Error(`Twitch ${role} token is not connected`);
+  if (row.token.expiresAt.getTime() <= Date.now() + 60_000) {
+    await refreshUserToken(db, config, role);
+    const [refreshed] = await db.select({ account: twitchAccounts, token: twitchTokens })
+      .from(twitchAccounts)
+      .innerJoin(twitchTokens, eq(twitchTokens.accountId, twitchAccounts.id))
+      .where(eq(twitchAccounts.role, role))
+      .limit(1);
+    if (!refreshed) throw new Error(`Twitch ${role} token is not connected`);
+    return { accessToken: decryptSecret(refreshed.token.accessTokenCiphertext, config), account: refreshed.account, scopes: refreshed.token.scopes.length ? refreshed.token.scopes : refreshed.account.grantedScopes };
+  }
+  return { accessToken: decryptSecret(row.token.accessTokenCiphertext, config), account: row.account, scopes: row.token.scopes.length ? row.token.scopes : row.account.grantedScopes };
+}
+
 export async function getAppAccessToken(config: AppConfig) {
   requireClientConfig(config);
   if (appTokenCache && appTokenCache.expiresAt.getTime() > Date.now() + 60_000) return appTokenCache;

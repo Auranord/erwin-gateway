@@ -4,6 +4,7 @@ import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
 import { appApiKeys, apps } from '../../db/schema.js';
 import { createOutgoingChatMessage, getOutgoingChatMessage, listOutgoingChatMessages } from '../twitch-chat/service.js';
+import { createReward, deleteReward, fetchRedemptionsFromTwitch, getReward, listRedemptions, listRewards, syncRewards, updateRedemptionStatus, updateReward } from '../channel-points/service.js';
 import { deliverWebhookNow, getEvent, getWebhookDeliveryWithAttempts, listChatLog, listEvents, listWebhookDeliveries } from '../webhooks/service.js';
 import { z } from 'zod';
 import { extractKeyPrefix, hashAppApiKey, safeCompareHashes } from './api-keys.js';
@@ -182,6 +183,117 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
     const result = await getOutgoingChatMessage(options.db, params.data.id);
     if (!result) return reply.code(404).send({ error: 'Message not found' });
     return result;
+  });
+
+
+  const rewardPayloadSchema = z.object({
+    title: z.string().min(1).max(45).optional(),
+    cost: z.number().int().min(1).max(1_000_000_000).optional(),
+    prompt: z.string().max(200).optional().nullable(),
+    is_enabled: z.boolean().optional(),
+    background_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+    is_user_input_required: z.boolean().optional(),
+    is_max_per_stream_enabled: z.boolean().optional(),
+    max_per_stream: z.number().int().positive().optional(),
+    is_max_per_user_per_stream_enabled: z.boolean().optional(),
+    max_per_user_per_stream: z.number().int().positive().optional(),
+    is_global_cooldown_enabled: z.boolean().optional(),
+    global_cooldown_seconds: z.number().int().positive().optional(),
+    should_redemptions_skip_request_queue: z.boolean().optional()
+  });
+  const createRewardSchema = rewardPayloadSchema.extend({ title: z.string().min(1).max(45), cost: z.number().int().min(1).max(1_000_000_000) });
+
+  app.get('/api/v1/channel-points/rewards', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const query = z.object({ include_deleted: z.coerce.boolean().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    const result = await listRewards(options.db, authenticatedApp, { includeDeleted: query.data.include_deleted });
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { rewards: result.rewards };
+  });
+
+  app.post('/api/v1/channel-points/rewards', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const body = createRewardSchema.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: 'Invalid reward payload', issues: body.error.issues });
+    const result = await createReward(options.db, options.config, authenticatedApp, body.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return reply.code(result.statusCode).send({ reward: result.reward });
+  });
+
+  app.post('/api/v1/channel-points/rewards/sync', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const result = await syncRewards(options.db, options.config, authenticatedApp);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { run: result.run, rewards: result.rewards };
+  });
+
+  app.get('/api/v1/channel-points/rewards/:rewardId', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const params = z.object({ rewardId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid reward id' });
+    const result = await getReward(options.db, authenticatedApp, params.data.rewardId);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { reward: result.reward };
+  });
+
+  app.patch('/api/v1/channel-points/rewards/:rewardId', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const params = z.object({ rewardId: z.string().uuid() }).safeParse(request.params);
+    const body = rewardPayloadSchema.safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid reward id' });
+    if (!body.success) return reply.code(400).send({ error: 'Invalid reward payload', issues: body.error.issues });
+    const result = await updateReward(options.db, options.config, authenticatedApp, params.data.rewardId, body.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { reward: result.reward };
+  });
+
+  app.delete('/api/v1/channel-points/rewards/:rewardId', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const params = z.object({ rewardId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid reward id' });
+    const result = await deleteReward(options.db, options.config, authenticatedApp, params.data.rewardId);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { reward: result.reward };
+  });
+
+  app.get('/api/v1/channel-points/rewards/:rewardId/redemptions', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const params = z.object({ rewardId: z.string().uuid() }).safeParse(request.params);
+    const query = z.object({ status: z.string().optional(), sync: z.coerce.boolean().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!params.success || !query.success) return reply.code(400).send({ error: 'Invalid redemptions request' });
+    const result = query.data.sync ? await fetchRedemptionsFromTwitch(options.db, options.config, authenticatedApp, params.data.rewardId, query.data.status) : await listRedemptions(options.db, authenticatedApp, { rewardId: params.data.rewardId, status: query.data.status, limit: query.data.limit });
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { redemptions: result.redemptions };
+  });
+
+  app.get('/api/v1/channel-points/redemptions', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const query = z.object({ status: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    const result = await listRedemptions(options.db, authenticatedApp, query.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { redemptions: result.redemptions };
+  });
+
+  app.patch('/api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const params = z.object({ rewardId: z.string().uuid(), redemptionId: z.string().uuid() }).safeParse(request.params);
+    const body = z.object({ status: z.enum(['FULFILLED', 'CANCELED']), reason: z.string().max(500).optional() }).safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid reward or redemption id' });
+    if (!body.success) return reply.code(400).send({ error: 'Invalid status payload', issues: body.error.issues });
+    const result = await updateRedemptionStatus(options.db, options.config, authenticatedApp, params.data.rewardId, params.data.redemptionId, body.data.status, body.data.reason);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { redemption: result.redemption };
   });
 
   app.get('/api/v1/webhook-deliveries', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {

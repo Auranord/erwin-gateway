@@ -61,6 +61,10 @@ type WebhookDelivery = { id: string; appId: string; endpointId: string; eventId:
 
 type TextCommand = { id: string; channelId: string | null; command: string; aliases: string[]; prefix: string; responseText: string; enabled: boolean; requiredRole: string; cooldownSeconds: number; userCooldownSeconds: number; replyMode: string; usageCount: number; lastUsedAt: string | null; createdAt: string; updatedAt: string; archivedAt: string | null; };
 
+type ChannelPointReward = { id: string; twitchRewardId: string; owningAppId: string | null; title: string; cost: number; enabled: boolean; manageable: boolean; deletedAt: string | null; lastSyncedAt: string | null; };
+type ChannelPointRedemption = { id: string; twitchRedemptionId: string; rewardId: string | null; twitchRewardId: string; userLogin: string | null; userDisplayName: string | null; status: string; userInput: string | null; redeemedAt: string; eventId: string | null; };
+type ChannelPointDiagnostics = { missingChannelManageRedemptions?: boolean; lastRewardSync?: unknown; lastRedemptionEvent?: unknown; rewardsMissingOnTwitch?: number; twitchRewardsMissingOwnershipMapping?: number; notes?: string[] };
+
 type OutgoingMessage = { id: string; sourceAppId: string; channelId: string; message: string; replyParentMessageId: string | null; priority: number; status: string; idempotencyKey: string; twitchMessageId: string | null; twitchIsSent: boolean | null; twitchDropReason: unknown; responseCode: number | null; responseBodyExcerpt: string | null; attempts: number; nextAttemptAt: string; lastError: string | null; createdAt: string; sentAt: string | null; failedAt: string | null; };
 
 type RegisteredApp = {
@@ -129,6 +133,10 @@ function App() {
   const [outgoingMessages, setOutgoingMessages] = useState<OutgoingMessage[]>([]);
   const [outgoingStatus, setOutgoingStatus] = useState('');
   const [textCommands, setTextCommands] = useState<TextCommand[]>([]);
+  const [channelPointRewards, setChannelPointRewards] = useState<ChannelPointReward[]>([]);
+  const [channelPointRedemptions, setChannelPointRedemptions] = useState<ChannelPointRedemption[]>([]);
+  const [channelPointDiagnostics, setChannelPointDiagnostics] = useState<ChannelPointDiagnostics | null>(null);
+  const [rewardForm, setRewardForm] = useState({ title: 'Hatchery Reward', cost: 1000, prompt: 'Redeem a Hatchery reward', is_enabled: true });
   const [commandForm, setCommandForm] = useState({ command: 'dc', aliases: 'discord', prefix: '!', responseText: 'Join the Discord: https://discord.gg/example', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
@@ -194,6 +202,7 @@ function App() {
     void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
     void loadOutgoingMessages().catch((loadError) => setError(String(loadError)));
     void loadTextCommands().catch((loadError) => setError(String(loadError)));
+    void loadChannelPoints().catch((loadError) => setError(String(loadError)));
   }, []);
 
   async function loadChatLog(search = chatSearch) {
@@ -217,6 +226,39 @@ function App() {
     if (!response.ok) throw new Error(`Text commands API returned ${response.status}`);
     const payload = await response.json();
     setTextCommands(payload.commands ?? []);
+  }
+
+  async function loadChannelPoints() {
+    const response = await fetch('/api/admin/channel-points', { headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Channel Points API returned ${response.status}`);
+    const payload = await response.json();
+    setChannelPointRewards(payload.rewards ?? []);
+    setChannelPointRedemptions(payload.redemptions ?? []);
+    setChannelPointDiagnostics(payload.diagnostics ?? null);
+  }
+
+  async function syncChannelPoints() {
+    const response = await fetch('/api/admin/channel-points/rewards/sync', { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
+    if (!response.ok) throw new Error(`Channel Points sync failed with ${response.status}`);
+    await loadChannelPoints();
+  }
+
+  async function createChannelPointReward() {
+    const response = await fetch('/api/admin/channel-points/rewards', { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(rewardForm) });
+    if (!response.ok) throw new Error(`Create reward failed with ${response.status}`);
+    await loadChannelPoints();
+  }
+
+  async function updateChannelPointReward(reward: ChannelPointReward, patch: Record<string, unknown>) {
+    const response = await fetch(`/api/admin/channel-points/rewards/${reward.id}`, { method: 'PATCH', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(patch) });
+    if (!response.ok) throw new Error(`Update reward failed with ${response.status}`);
+    await loadChannelPoints();
+  }
+
+  async function deleteChannelPointReward(reward: ChannelPointReward) {
+    const response = await fetch(`/api/admin/channel-points/rewards/${reward.id}`, { method: 'DELETE', headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Delete reward failed with ${response.status}`);
+    await loadChannelPoints();
   }
 
   async function loadOutgoingMessages(status = outgoingStatus) {
@@ -731,7 +773,65 @@ function App() {
           </div>
         </section>
 
-        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Text Commands', 'Diagnostics', 'Chat Log', 'Outgoing Messages', 'Webhook Deliveries'].includes(page)).map((page) => (
+
+        <section className="page-card" id="channel-points">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Hatchery MVP rewards</p>
+              <h2>Channel Points</h2>
+              <p>Reward management uses the broadcaster user token with <code>channel:manage:redemptions</code>; Hatchery keeps economy logic.</p>
+            </div>
+            <div className="button-row">
+              <button onClick={() => void syncChannelPoints().catch((syncError) => setError(String(syncError)))}>Sync from Twitch</button>
+              <button onClick={() => void loadChannelPoints().catch((loadError) => setError(String(loadError)))}>Refresh</button>
+            </div>
+          </div>
+
+          <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void createChannelPointReward().catch((createError) => setError(String(createError))); }}>
+            <label>Title<input value={rewardForm.title} onChange={(event) => setRewardForm({ ...rewardForm, title: event.target.value })} /></label>
+            <label>Cost<input type="number" min="1" value={rewardForm.cost} onChange={(event) => setRewardForm({ ...rewardForm, cost: Number(event.target.value) })} /></label>
+            <label>Prompt<textarea value={rewardForm.prompt} onChange={(event) => setRewardForm({ ...rewardForm, prompt: event.target.value })} /></label>
+            <label className="checkbox-label"><input type="checkbox" checked={rewardForm.is_enabled} onChange={(event) => setRewardForm({ ...rewardForm, is_enabled: event.target.checked })} /> Enabled</label>
+            <button type="submit">Create reward</button>
+          </form>
+
+          <div className="stats-grid">
+            <article><h3>Missing scope</h3><p>{channelPointDiagnostics?.missingChannelManageRedemptions ? 'channel:manage:redemptions missing' : 'OK'}</p></article>
+            <article><h3>Last sync</h3><p>{JSON.stringify(channelPointDiagnostics?.lastRewardSync ?? null)}</p></article>
+            <article><h3>Last redemption</h3><p>{JSON.stringify(channelPointDiagnostics?.lastRedemptionEvent ?? null)}</p></article>
+            <article><h3>Missing ownership</h3><p>{channelPointDiagnostics?.twitchRewardsMissingOwnershipMapping ?? 0}</p></article>
+          </div>
+
+          <h3>Reward list</h3>
+          <div className="table-list">
+            {channelPointRewards.map((reward) => (
+              <article className="delivery-row" key={reward.id}>
+                <div><strong>{reward.title}</strong> <code>{reward.twitchRewardId}</code></div>
+                <p>cost {reward.cost} · owner {apps.find((app) => app.id === reward.owningAppId)?.slug ?? reward.owningAppId ?? 'unmapped'} · {reward.enabled ? 'enabled' : 'disabled'} · {reward.manageable ? 'manageable' : 'not manageable'}</p>
+                <div className="button-row">
+                  <button onClick={() => void updateChannelPointReward(reward, { is_enabled: !reward.enabled }).catch((updateError) => setError(String(updateError)))}>{reward.enabled ? 'Disable' : 'Enable'}</button>
+                  <button onClick={() => void deleteChannelPointReward(reward).catch((deleteError) => setError(String(deleteError)))}>Delete</button>
+                </div>
+              </article>
+            ))}
+            {channelPointRewards.length === 0 ? <p>No Channel Point rewards have been synced yet.</p> : null}
+          </div>
+
+          <h3>Recent redemptions</h3>
+          <div className="table-list">
+            {channelPointRedemptions.map((redemption) => (
+              <article className="delivery-row" key={redemption.id}>
+                <div><strong>{redemption.status}</strong> <code>{redemption.twitchRedemptionId}</code></div>
+                <p>{redemption.userDisplayName ?? redemption.userLogin ?? 'unknown'} · reward {redemption.twitchRewardId} · {new Date(redemption.redeemedAt).toLocaleString()}</p>
+                {redemption.userInput ? <p>{redemption.userInput}</p> : null}
+                <div className="chips"><span>gateway event {redemption.eventId ?? 'pending'}</span><span>delivery visible in Webhook Deliveries</span></div>
+              </article>
+            ))}
+            {channelPointRedemptions.length === 0 ? <p>No redemptions recorded yet.</p> : null}
+          </div>
+        </section>
+
+        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Text Commands', 'Diagnostics', 'Chat Log', 'Outgoing Messages', 'Webhook Deliveries', 'Channel Points'].includes(page)).map((page) => (
           <section className="page-card placeholder" id={page.toLowerCase().replaceAll(' ', '-')} key={page}>
             <h2>{page}</h2>
             <p>Operational controls for this area arrive in later phases.</p>
