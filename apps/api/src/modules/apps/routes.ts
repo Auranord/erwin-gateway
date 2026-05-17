@@ -6,6 +6,7 @@ import { appApiKeys, apps } from '../../db/schema.js';
 import { createOutgoingChatMessage, getOutgoingChatMessage, listOutgoingChatMessages } from '../twitch-chat/service.js';
 import { createReward, deleteReward, fetchRedemptionsFromTwitch, getReward, listRedemptions, listRewards, syncRewards, updateRedemptionStatus, updateReward } from '../channel-points/service.js';
 import { deliverWebhookNow, getEvent, getWebhookDeliveryWithAttempts, listChatLog, listEvents, listWebhookDeliveries } from '../webhooks/service.js';
+import { getChannelProfile, getChannelSchedule, getCurrentStream, listBitsLeaderboard, listChannels, listSubscriptions, runBitsBackfill, runSubscriptionBackfill } from '../twitch-data.js';
 import { z } from 'zod';
 import { extractKeyPrefix, hashAppApiKey, safeCompareHashes } from './api-keys.js';
 
@@ -294,6 +295,89 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
     const result = await updateRedemptionStatus(options.db, options.config, authenticatedApp, params.data.rewardId, params.data.redemptionId, body.data.status, body.data.reason);
     if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
     return { redemption: result.redemption };
+  });
+
+
+  app.post('/api/v1/subscriptions/backfill', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const result = await runSubscriptionBackfill(options.db, options.config, authenticatedApp);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error, run: 'run' in result ? result.run : undefined });
+    return { run: result.run, subscriptions: result.subscriptions.ok ? result.subscriptions.subscriptions : [] };
+  });
+
+  app.get('/api/v1/subscriptions', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const query = z.object({ status: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    const result = await listSubscriptions(options.db, authenticatedApp, query.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { subscriptions: result.subscriptions };
+  });
+
+  app.post('/api/v1/bits/backfill', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const body = z.object({ period: z.enum(['day', 'week', 'month', 'year', 'all']).optional(), count: z.number().int().positive().max(100).optional() }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'Invalid bits backfill payload', issues: body.error.issues });
+    const result = await runBitsBackfill(options.db, options.config, authenticatedApp, body.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error, run: 'run' in result ? result.run : undefined });
+    return { run: result.run, leaderboard: result.leaderboard.ok ? result.leaderboard.leaderboard : [] };
+  });
+
+  app.get('/api/v1/bits/leaderboard', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const query = z.object({ period: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    const result = await listBitsLeaderboard(options.db, authenticatedApp, query.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { leaderboard: result.leaderboard };
+  });
+
+  app.get('/api/v1/channel/status', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const result = await getCurrentStream(options.db, options.config, authenticatedApp);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return result.status;
+  });
+
+  app.get('/api/v1/streams/current', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const result = await getCurrentStream(options.db, options.config, authenticatedApp);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { stream: result.stream, status: result.status };
+  });
+
+  app.get('/api/v1/channels', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const result = await listChannels(options.db, authenticatedApp);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { channels: result.channels };
+  });
+
+  app.get('/api/v1/channels/:channelId/profile', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const params = z.object({ channelId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid channel id' });
+    const result = await getChannelProfile(options.db, options.config, authenticatedApp, params.data.channelId);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { profile: result.profile };
+  });
+
+  app.get('/api/v1/channels/:channelId/schedule', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const params = z.object({ channelId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid channel id' });
+    const result = await getChannelSchedule(options.db, options.config, authenticatedApp, params.data.channelId);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    return { schedule: result.schedule };
   });
 
   app.get('/api/v1/webhook-deliveries', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {

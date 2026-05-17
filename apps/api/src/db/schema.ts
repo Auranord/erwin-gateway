@@ -352,6 +352,84 @@ export const rewardSyncRuns = pgTable('reward_sync_runs', {
   index('reward_sync_runs_status_idx').on(table.status)
 ]);
 
+export const twitchSubscriptions = pgTable('twitch_subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  twitchUserId: text('twitch_user_id').notNull(),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  userLogin: text('user_login'),
+  userDisplayName: text('user_display_name'),
+  tier: varchar('tier', { length: 16 }),
+  isGift: boolean('is_gift').notNull().default(false),
+  gifterUserId: text('gifter_user_id'),
+  gifterLogin: text('gifter_login'),
+  gifterDisplayName: text('gifter_display_name'),
+  status: varchar('status', { length: 32 }).notNull().default('active'),
+  lastEventType: text('last_event_type'),
+  rawPayload: jsonb('raw_payload_json').notNull().default({}),
+  rawEventId: uuid('raw_event_id').references(() => twitchEventsubMessages.id),
+  eventId: uuid('event_id').references(() => events.id),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  subscribedAt: timestamp('subscribed_at', { withTimezone: true }),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex('twitch_subscriptions_channel_user_idx').on(table.channelId, table.twitchUserId),
+  index('twitch_subscriptions_channel_status_idx').on(table.channelId, table.status),
+  index('twitch_subscriptions_updated_idx').on(table.updatedAt)
+]);
+
+export const subscriptionBackfillRuns = pgTable('subscription_backfill_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  requestedByAppId: uuid('requested_by_app_id').references(() => apps.id),
+  status: varchar('status', { length: 32 }).notNull().default('running'),
+  subscriptionsSeen: integer('subscriptions_seen').notNull().default(0),
+  cursor: text('cursor'),
+  error: text('error'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true })
+}, (table) => [
+  index('subscription_backfill_runs_channel_started_idx').on(table.channelId, table.startedAt),
+  index('subscription_backfill_runs_status_idx').on(table.status)
+]);
+
+export const bitsLeaderboardEntries = pgTable('bits_leaderboard_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  userId: text('user_id').notNull(),
+  userLogin: text('user_login'),
+  userDisplayName: text('user_display_name'),
+  rank: integer('rank'),
+  score: integer('score').notNull().default(0),
+  period: varchar('period', { length: 32 }).notNull().default('all'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  rawPayload: jsonb('raw_payload_json').notNull().default({}),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex('bits_leaderboard_entries_channel_user_period_idx').on(table.channelId, table.userId, table.period),
+  index('bits_leaderboard_entries_channel_score_idx').on(table.channelId, table.score),
+  index('bits_leaderboard_entries_synced_idx').on(table.lastSyncedAt)
+]);
+
+export const bitsBackfillRuns = pgTable('bits_backfill_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  requestedByAppId: uuid('requested_by_app_id').references(() => apps.id),
+  status: varchar('status', { length: 32 }).notNull().default('running'),
+  entriesSeen: integer('entries_seen').notNull().default(0),
+  period: varchar('period', { length: 32 }).notNull().default('all'),
+  error: text('error'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true })
+}, (table) => [
+  index('bits_backfill_runs_channel_started_idx').on(table.channelId, table.startedAt),
+  index('bits_backfill_runs_status_idx').on(table.status)
+]);
+
 
 export const textCommands = pgTable('text_commands', {
   id: uuid('id').primaryKey().defaultRandom(),

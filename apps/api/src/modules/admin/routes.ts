@@ -11,6 +11,7 @@ import { registerTwitchAdminRoutes } from '../twitch/routes.js';
 import { getOutgoingChatMessage, listOutgoingChatMessages, retryOutgoingChatMessage } from '../twitch-chat/service.js';
 import { deliverWebhookNow, generateWebhookSecret, getWebhookDeliveryWithAttempts, listChatLog, listWebhookDeliveries } from '../webhooks/service.js';
 import { channelPointDiagnostics, createReward, deleteReward, listRedemptions, listRewards, syncRewards, updateReward } from '../channel-points/service.js';
+import { twitchDataDiagnostics } from '../twitch-data.js';
 
 const adminPages = [
   'Dashboard',
@@ -201,11 +202,18 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
 
   app.get('/api/admin/shell', async () => ({
     service: 'erwin-gateway',
-    phase: 'phase-7-simple-text-commands',
+    phase: 'phase-9-twitch-data',
     pages: adminPages,
     adminAuth: options.config.INTERNAL_ADMIN_API_KEY ? 'internal_admin_api_key' : 'not_configured_for_development',
     message: 'Admin UI shell is available with app registry, Twitch setup, outgoing queue, and text command management.'
   }));
+
+
+  app.get('/api/admin/diagnostics', async (_request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const recentEvents = await options.db.select().from(events).orderBy(desc(events.createdAt)).limit(25);
+    return { twitchData: await twitchDataDiagnostics(options.db), channelPoints: await channelPointDiagnostics(options.db), recentEvents };
+  });
 
   app.get('/api/admin/apps', async (_request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;
