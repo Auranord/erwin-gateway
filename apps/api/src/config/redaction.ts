@@ -1,4 +1,8 @@
 export const secretRedactionPaths = [
+  'req.url',
+  'req.query.code',
+  'req.query.state',
+  'req.query.error_description',
   'req.headers.authorization',
   'req.headers.cookie',
   'req.headers.x-api-key',

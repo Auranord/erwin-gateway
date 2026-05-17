@@ -6,6 +6,7 @@ import type { Database } from '../../db/client.js';
 import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints } from '../../db/schema.js';
 import { generateAppApiKey } from '../apps/api-keys.js';
 import { appPermissions, defaultAppPermissions, normalizePermissions } from '../apps/permissions.js';
+import { registerTwitchAdminRoutes } from '../twitch/routes.js';
 
 const adminPages = [
   'Dashboard',
@@ -177,10 +178,10 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
 
   app.get('/api/admin/shell', async () => ({
     service: 'erwin-gateway',
-    phase: 'phase-2-app-registry',
+    phase: 'phase-3-twitch-auth',
     pages: adminPages,
     adminAuth: options.config.INTERNAL_ADMIN_API_KEY ? 'internal_admin_api_key' : 'not_configured_for_development',
-    message: 'Admin UI shell is available with app registry management.'
+    message: 'Admin UI shell is available with app registry and Twitch setup management.'
   }));
 
   app.get('/api/admin/apps', async (_request, reply) => {
@@ -304,6 +305,8 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
       rawKeyShownOnlyOnce: true
     });
   });
+
+  await registerTwitchAdminRoutes(app, options);
 
   app.delete('/api/admin/apps/:id/keys/:keyId', async (request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;

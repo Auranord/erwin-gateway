@@ -11,6 +11,7 @@ import { createLogger } from './lib/logger.js';
 import { registerAdminApiRoutes } from './modules/admin/routes.js';
 import { registerHealthRoutes } from './modules/health/routes.js';
 import { registerAppApiRoutes } from './modules/apps/routes.js';
+import { startTwitchTokenWorker } from './modules/twitch/worker.js';
 
 interface BuildAppOptions {
   config: AppConfig;
@@ -33,9 +34,10 @@ export async function buildApp(options: BuildAppOptions) {
     credentials: true
   });
 
-  await registerHealthRoutes(app, { config, pool });
+  await registerHealthRoutes(app, { config, pool, db: options.db });
   await registerAppApiRoutes(app, { config, db: options.db });
   await registerAdminApiRoutes(app, { config, db: options.db });
+  startTwitchTokenWorker(app, config, options.db);
 
   const webDist = path.resolve(dirname, '../../../web/dist');
   const hasWebDist = fs.existsSync(webDist);

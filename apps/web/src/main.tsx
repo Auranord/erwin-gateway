@@ -18,6 +18,30 @@ type Webhook = {
   eventFilters: string[];
 };
 
+
+type TwitchAccountStatus = {
+  role: 'bot' | 'broadcaster';
+  connected: boolean;
+  login: string | null;
+  twitchUserId: string | null;
+  grantedScopes: string[];
+  requiredScopes: string[];
+  missingScopes: string[];
+  expiresAt: string | null;
+  tokenExpired: boolean;
+  tokenValid: boolean;
+  validationError: string | null;
+  lastRefreshError: string | null;
+};
+
+type TwitchSetupStatus = {
+  status: 'healthy' | 'degraded';
+  appToken: { configured: boolean; valid: boolean; expiresAt: string | null; error: string | null };
+  bot: TwitchAccountStatus;
+  broadcaster: TwitchAccountStatus;
+  degradedReasons: string[];
+};
+
 type RegisteredApp = {
   id: string;
   name: string;
@@ -76,6 +100,8 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newRawKey, setNewRawKey] = useState<string | null>(null);
+  const [twitchStatus, setTwitchStatus] = useState<TwitchSetupStatus | null>(null);
+  const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
   const [form, setForm] = useState({
     name: 'My Downstream App',
@@ -101,6 +127,19 @@ function App() {
     }
   }
 
+  async function loadTwitchStatus() {
+    setTwitchLoading(true);
+    try {
+      const response = await fetch('/api/admin/twitch/setup/status', { headers: adminHeaders() });
+      if (!response.ok) throw new Error(`Twitch status API returned ${response.status}`);
+      setTwitchStatus(await response.json());
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load Twitch setup');
+    } finally {
+      setTwitchLoading(false);
+    }
+  }
+
   async function loadApps() {
     setLoading(true);
     setError(null);
@@ -119,6 +158,7 @@ function App() {
 
   useEffect(() => {
     void loadApps();
+    void loadTwitchStatus();
   }, []);
 
   async function createApp() {
@@ -162,6 +202,53 @@ function App() {
     await loadApps();
   }
 
+  async function startTwitchLogin(role: 'bot' | 'broadcaster') {
+    const response = await fetch(`/api/admin/twitch/${role}/login/start`, {
+      method: 'POST',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ returnTo: `${window.location.origin}/admin#twitch-setup` })
+    });
+    if (!response.ok) throw new Error(`Start Twitch ${role} login failed with ${response.status}`);
+    const payload = await response.json();
+    window.location.assign(payload.authorizationUrl);
+  }
+
+  async function refreshTwitchTokens() {
+    const response = await fetch('/api/admin/twitch/tokens/refresh', {
+      method: 'POST',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({})
+    });
+    if (!response.ok) throw new Error(`Refresh Twitch tokens failed with ${response.status}`);
+    await loadTwitchStatus();
+  }
+
+  function renderTwitchAccount(account: TwitchAccountStatus) {
+    return (
+      <article className={account.connected && !account.missingScopes.length && !account.tokenExpired ? 'twitch-account healthy' : 'twitch-account degraded'}>
+        <div className="app-card-header">
+          <div>
+            <h3>{account.role === 'bot' ? 'Dedicated bot account' : 'Broadcaster account'}</h3>
+            <p>{account.connected ? `${account.login} · ${account.twitchUserId}` : 'Not connected'}</p>
+          </div>
+          <button onClick={() => void startTwitchLogin(account.role).catch((loginError) => setError(String(loginError)))}>Start {account.role} login</button>
+        </div>
+        <div className="twitch-meta">
+          <span>{account.connected ? 'Connected' : 'Missing authorization'}</span>
+          <span>Expires: {account.expiresAt ?? 'not available'}</span>
+          {account.tokenExpired ? <span>Token expired/missing</span> : null}
+          {!account.tokenValid ? <span>Token invalid{account.validationError ? `: ${account.validationError}` : ''}</span> : null}
+          {account.lastRefreshError ? <span>Refresh error: {account.lastRefreshError}</span> : null}
+        </div>
+        <div className="scope-grid">
+          <div><strong>Granted scopes</strong><div className="chips">{account.grantedScopes.length ? account.grantedScopes.map((scope) => <span key={scope}>{scope}</span>) : <span>none</span>}</div></div>
+          <div><strong>Missing scopes</strong><div className="chips missing">{account.missingScopes.length ? account.missingScopes.map((scope) => <span key={scope}>{scope}</span>) : <span>none</span>}</div></div>
+          <div><strong>Required scopes</strong><div className="chips">{account.requiredScopes.map((scope) => <span key={scope}>{scope}</span>)}</div></div>
+        </div>
+      </article>
+    );
+  }
+
   async function revokeKey(app: RegisteredApp, key: ApiKey) {
     if (!window.confirm(`Revoke API key ${key.keyPrefix}?`)) return;
     const response = await fetch(`/api/admin/apps/${app.id}/keys/${key.id}`, { method: 'DELETE', headers: adminHeaders() });
@@ -182,11 +269,11 @@ function App() {
 
       <section className="content">
         <header className="hero" id="dashboard">
-          <p className="eyebrow">Phase 2 app registry</p>
+          <p className="eyebrow">Phase 3 Twitch auth</p>
           <h1>Admin operations</h1>
           <p>
-            Create downstream apps, assign contract permissions, rotate app API keys, and prepare webhook endpoint
-            configuration before services such as erwin-music and erwin-hatchery call the gateway.
+            Connect the dedicated Twitch bot account and broadcaster account, verify required scopes, and keep
+            downstream app registry controls ready for erwin-music and erwin-hatchery.
           </p>
         </header>
 
@@ -199,9 +286,36 @@ function App() {
         <section className="status-card" aria-label="Gateway status summary">
           <span className="status-dot" />
           <div>
-            <strong>{activeApps} enabled app{activeApps === 1 ? '' : 's'}</strong>
-            <p>{loading ? 'Loading app registry…' : 'App registry controls are available below.'}</p>
+            <strong>{twitchStatus?.status === 'healthy' ? 'Twitch auth healthy' : 'Twitch auth degraded'} · {activeApps} enabled app{activeApps === 1 ? '' : 's'}</strong>
+            <p>{loading || twitchLoading ? 'Loading admin status…' : 'Twitch setup and app registry controls are available below.'}</p>
           </div>
+        </section>
+
+
+        <section className="page-card twitch-panel" id="twitch-setup">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Twitch Setup</p>
+              <h2>OAuth connections and scope health</h2>
+            </div>
+            <div className="button-row">
+              <button onClick={() => void loadTwitchStatus()}>Refresh status</button>
+              <button onClick={() => void refreshTwitchTokens().catch((refreshError) => setError(String(refreshError)))}>Refresh tokens</button>
+            </div>
+          </div>
+          {twitchStatus ? (
+            <>
+              <div className="app-token-card">
+                <strong>App Access Token</strong>
+                <p>{twitchStatus.appToken.valid ? `Valid until ${twitchStatus.appToken.expiresAt}` : `Degraded: ${twitchStatus.appToken.error ?? 'not configured'}`}</p>
+              </div>
+              <div className="twitch-account-list">
+                {renderTwitchAccount(twitchStatus.bot)}
+                {renderTwitchAccount(twitchStatus.broadcaster)}
+              </div>
+              {twitchStatus.degradedReasons.length ? <p className="error">Degraded reasons: {twitchStatus.degradedReasons.join(', ')}</p> : null}
+            </>
+          ) : <p>{twitchLoading ? 'Loading Twitch setup…' : 'Twitch setup status has not loaded yet.'}</p>}
         </section>
 
         <section className="page-card apps-panel" id="apps">
@@ -280,7 +394,7 @@ function App() {
           </div>
         </section>
 
-        {pages.filter((page) => page !== 'Dashboard' && page !== 'Apps').map((page) => (
+        {pages.filter((page) => page !== 'Dashboard' && page !== 'Apps' && page !== 'Twitch Setup').map((page) => (
           <section className="page-card placeholder" id={page.toLowerCase().replaceAll(' ', '-')} key={page}>
             <h2>{page}</h2>
             <p>Operational controls for this area arrive in later phases.</p>
