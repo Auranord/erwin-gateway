@@ -1,11 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import type { AppConfig } from '../../config/env.js';
+import type { Database } from '../../db/client.js';
 import type { HealthResponse } from '@erwin-gateway/shared';
+import { getTwitchSetupStatus } from '../twitch/service.js';
 
 interface HealthRouteOptions {
   config: AppConfig;
   pool?: Pool;
+  db?: Database;
 }
 
 function baseHealth(config: AppConfig, status: HealthResponse['status']): HealthResponse & {
@@ -24,37 +27,88 @@ function baseHealth(config: AppConfig, status: HealthResponse['status']): Health
   };
 }
 
+async function databaseReachable(pool?: Pool) {
+  if (!pool) return 'not_configured';
+  await pool.query('select 1');
+  return 'reachable';
+}
+
 export async function registerHealthRoutes(app: FastifyInstance, options: HealthRouteOptions) {
   app.get('/api/v1/health/live', async () => baseHealth(options.config, 'healthy'));
 
   app.get('/api/v1/health/ready', async (request, reply) => {
-    if (!options.pool) {
-      return reply.code(503).send({
-        ...baseHealth(options.config, 'degraded'),
+    try {
+      const database = await databaseReachable(options.pool);
+      if (database !== 'reachable') {
+        return reply.code(503).send({ ...baseHealth(options.config, 'degraded'), checks: { database } });
+      }
+
+      const twitch = options.db ? await getTwitchSetupStatus(options.db, options.config) : null;
+      const ready = twitch?.status !== 'degraded';
+      return reply.code(ready ? 200 : 503).send({
+        ...baseHealth(options.config, ready ? 'ready' : 'degraded'),
         checks: {
-          database: 'not_configured'
+          database,
+          migrations: 'phase_3_twitch_auth_expected',
+          workers: 'twitch_token_worker_registered',
+          twitchAuth: twitch?.status ?? 'not_configured'
         }
       });
+    } catch (error) {
+      request.log.warn({ error }, 'readiness check failed');
+      return reply.code(503).send({ ...baseHealth(options.config, 'degraded'), checks: { database: 'unreachable' } });
+    }
+  });
+
+  app.get('/api/v1/health/deep', async (request, reply) => {
+    const checks: Record<string, unknown> = {
+      database: 'not_configured',
+      migrations: 'phase_3_twitch_auth_expected',
+      workers: { twitchTokenRefresh: Boolean(options.db) },
+      eventSub: 'not_implemented_in_phase_3',
+      queues: 'pending_later_phase'
+    };
+
+    let status: HealthResponse['status'] = 'healthy';
+    try {
+      checks.database = await databaseReachable(options.pool);
+    } catch (error) {
+      request.log.warn({ error }, 'deep health database check failed');
+      checks.database = 'unreachable';
+      status = 'degraded';
     }
 
-    try {
-      await options.pool.query('select 1');
-      return {
-        ...baseHealth(options.config, 'ready'),
-        checks: {
-          database: 'reachable',
-          migrations: 'pending_phase_2',
-          workers: 'pending_phase_2'
-        }
-      };
-    } catch (error) {
-      request.log.warn({ error }, 'readiness database check failed');
-      return reply.code(503).send({
-        ...baseHealth(options.config, 'degraded'),
-        checks: {
-          database: 'unreachable'
-        }
-      });
+    if (options.db) {
+      try {
+        const twitch = await getTwitchSetupStatus(options.db, options.config);
+        checks.twitch = {
+          appTokenValidity: twitch.appToken,
+          botTokenValidity: twitch.bot,
+          broadcasterTokenValidity: twitch.broadcaster,
+          missingScopes: {
+            bot: twitch.bot.missingScopes,
+            broadcaster: twitch.broadcaster.missingScopes
+          },
+          tokenExpiry: {
+            bot: twitch.bot.expiresAt,
+            broadcaster: twitch.broadcaster.expiresAt
+          },
+          tokenRefreshErrors: {
+            bot: twitch.bot.lastRefreshError,
+            broadcaster: twitch.broadcaster.lastRefreshError
+          },
+          degradedReasons: twitch.degradedReasons
+        };
+        if (twitch.status === 'degraded') status = 'degraded';
+      } catch (error) {
+        checks.twitch = { status: 'degraded', error: error instanceof Error ? error.message : 'unknown Twitch health error' };
+        status = 'degraded';
+      }
+    } else {
+      checks.twitch = { status: 'not_configured' };
+      status = 'degraded';
     }
+
+    return reply.code(status === 'healthy' ? 200 : 503).send({ ...baseHealth(options.config, status), checks });
   });
 }
