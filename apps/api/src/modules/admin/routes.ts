@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
 import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints, events, webhookDeliveries } from '../../db/schema.js';
+import { archiveTextCommand, createTextCommand, getTextCommand, listTextCommandInvocations, listTextCommands, testTextCommand, textCommandReplyModes, textCommandRoles, updateTextCommand } from '../text-commands/service.js';
 import { generateAppApiKey } from '../apps/api-keys.js';
 import { appPermissions, defaultAppPermissions, normalizePermissions } from '../apps/permissions.js';
 import { registerTwitchAdminRoutes } from '../twitch/routes.js';
@@ -41,6 +42,22 @@ const updateAppSchema = createAppSchema.partial().extend({
 const createKeySchema = z.object({
   name: z.string().min(1).max(120).default('Default key')
 });
+
+const textCommandSchema = z.object({
+  channelId: z.string().uuid().optional().nullable(),
+  command: z.string().min(1).max(80),
+  aliases: z.array(z.string()).default([]),
+  prefix: z.string().min(1).max(8).default('!'),
+  responseText: z.string().min(1).max(500),
+  enabled: z.boolean().optional(),
+  requiredRole: z.enum(textCommandRoles).default('everyone'),
+  cooldownSeconds: z.number().int().min(0).max(86400).default(0),
+  userCooldownSeconds: z.number().int().min(0).max(86400).default(0),
+  replyMode: z.enum(textCommandReplyModes).default('message')
+});
+
+const updateTextCommandSchema = textCommandSchema.partial();
+
 
 interface AdminRouteOptions {
   config: AppConfig;
@@ -183,10 +200,10 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
 
   app.get('/api/admin/shell', async () => ({
     service: 'erwin-gateway',
-    phase: 'phase-3-twitch-auth',
+    phase: 'phase-7-simple-text-commands',
     pages: adminPages,
     adminAuth: options.config.INTERNAL_ADMIN_API_KEY ? 'internal_admin_api_key' : 'not_configured_for_development',
-    message: 'Admin UI shell is available with app registry and Twitch setup management.'
+    message: 'Admin UI shell is available with app registry, Twitch setup, outgoing queue, and text command management.'
   }));
 
   app.get('/api/admin/apps', async (_request, reply) => {
@@ -351,6 +368,65 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     const [delivery] = await options.db.insert(webhookDeliveries).values({ appId: record.id, endpointId: webhook.id, eventId: event.id, status: 'queued', payload: { schema: 'erwin.gateway.webhook.v1', delivery_id: null, event_id: event.id, type: event.type, occurred_at: event.occurredAt.toISOString(), received_at: event.createdAt.toISOString(), test: true, app_id: record.id, message: 'Webhook test from erwin-gateway' } }).returning();
     if (!delivery) return reply.code(500).send({ error: 'Test delivery was not created' });
     return { delivery: await deliverWebhookNow(options.db, delivery.id, true) };
+  });
+
+
+  app.get('/api/admin/text-commands', async (_request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    return { commands: await listTextCommands(options.db) };
+  });
+
+  app.post('/api/admin/text-commands', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const parsed = textCommandSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid text command payload', issues: parsed.error.issues });
+    const result = await createTextCommand(options.db, parsed.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error, issues: result.issues });
+    await audit(options.db, 'text_command.create', 'text_command', result.command.id, { command: result.command.command });
+    return reply.code(201).send({ command: result.command });
+  });
+
+  app.get('/api/admin/text-commands/:id', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid text command id' });
+    const command = await getTextCommand(options.db, params.data.id);
+    if (!command) return reply.code(404).send({ error: 'Text command not found' });
+    return { command, invocations: await listTextCommandInvocations(options.db, params.data.id) };
+  });
+
+  app.patch('/api/admin/text-commands/:id', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid text command id' });
+    const parsed = updateTextCommandSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid text command payload', issues: parsed.error.issues });
+    const result = await updateTextCommand(options.db, params.data.id, parsed.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error, issues: 'issues' in result ? result.issues : undefined });
+    await audit(options.db, 'text_command.update', 'text_command', result.command.id, { command: result.command.command });
+    return { command: result.command };
+  });
+
+  app.delete('/api/admin/text-commands/:id', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid text command id' });
+    const command = await archiveTextCommand(options.db, params.data.id);
+    if (!command) return reply.code(404).send({ error: 'Text command not found' });
+    await audit(options.db, 'text_command.archive', 'text_command', command.id, { command: command.command });
+    return { command };
+  });
+
+  app.post('/api/admin/text-commands/:id/test', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid text command id' });
+    const body = z.object({ user: z.string().optional(), displayName: z.string().optional(), channel: z.string().optional() }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'Invalid test payload', issues: body.error.issues });
+    const result = await testTextCommand(options.db, params.data.id, body.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
+    await audit(options.db, 'text_command.test', 'text_command', params.data.id, { status: result.result.status });
+    return result;
   });
 
   app.get('/api/admin/chat/log', async (request, reply) => {

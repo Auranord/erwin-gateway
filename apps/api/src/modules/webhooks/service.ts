@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import type { Database } from '../../db/client.js';
-import { appWebhookEndpoints, apps, events, twitchChannels, twitchChatMessages, twitchEventsubMessages, webhookDeliveries, webhookDeliveryAttempts } from '../../db/schema.js';
+import { appWebhookEndpoints, apps, diagnosticEvents, events, twitchChannels, twitchChatMessages, twitchEventsubMessages, webhookDeliveries, webhookDeliveryAttempts } from '../../db/schema.js';
+import { executeTextCommandForStoredChatMessage } from '../text-commands/service.js';
 
 const webhookSchema = 'erwin.gateway.webhook.v1';
 const maxAttempts = 5;
@@ -75,8 +76,13 @@ export async function normalizeChatMessageEvent(db: Database, params: { rawMessa
   };
   const [eventRow] = await db.insert(events).values({ source: 'twitch_eventsub', type: 'twitch.chat.message', externalId: event.message_id ?? params.rawMessageId, channelId: channel?.id ?? null, twitchMessageId: params.rawMessageId, twitchSubscriptionId: subscription?.id ?? null, payload: normalized, status: 'processed', occurredAt, processedAt: new Date() }).onConflictDoUpdate({ target: [events.source, events.externalId], set: { payload: normalized, status: 'processed', processedAt: new Date(), updatedAt: new Date() } }).returning();
   if (!eventRow) return null;
-  await db.insert(twitchChatMessages).values({ twitchMessageId: event.message_id ?? params.rawMessageId, channelId: channel?.id ?? null, chatterUserId: event.chatter_user_id ?? null, chatterLogin: event.chatter_user_login ?? null, chatterDisplayName: event.chatter_user_name ?? null, text, fragments: event.message?.fragments ?? [], badges, color: event.color ?? null, ...roles, isCommand: command.isCommand, commandSymbol: command.commandSymbol, commandName: command.commandName, commandArgsText: command.commandArgsText, commandArgs: command.commandArgs, replyParentMessageId: event.reply?.parent_message_id ?? null, rawEventId: rawRow?.id ?? null, eventId: eventRow.id }).onConflictDoNothing();
+  const [chatRow] = await db.insert(twitchChatMessages).values({ twitchMessageId: event.message_id ?? params.rawMessageId, channelId: channel?.id ?? null, chatterUserId: event.chatter_user_id ?? null, chatterLogin: event.chatter_user_login ?? null, chatterDisplayName: event.chatter_user_name ?? null, text, fragments: event.message?.fragments ?? [], badges, color: event.color ?? null, ...roles, isCommand: command.isCommand, commandSymbol: command.commandSymbol, commandName: command.commandName, commandArgsText: command.commandArgsText, commandArgs: command.commandArgs, replyParentMessageId: event.reply?.parent_message_id ?? null, rawEventId: rawRow?.id ?? null, eventId: eventRow.id }).onConflictDoNothing().returning();
   await enqueueWebhookDeliveriesForEvent(db, eventRow.id);
+  if (chatRow) {
+    void executeTextCommandForStoredChatMessage(db, chatRow.id).catch((error) => {
+      void db.insert(diagnosticEvents).values({ severity: 'error', module: 'text-commands', message: 'Text command handling failed', details: { chatMessageId: chatRow.id, error: error instanceof Error ? error.message : String(error) } });
+    });
+  }
   return eventRow;
 }
 

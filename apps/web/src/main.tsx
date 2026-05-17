@@ -59,6 +59,8 @@ type ChatMessage = { id: string; chatterLogin: string | null; chatterDisplayName
 
 type WebhookDelivery = { id: string; appId: string; endpointId: string; eventId: string; status: string; attempts: number; nextAttemptAt: string; lastError: string | null; deliveredAt: string | null; createdAt: string; };
 
+type TextCommand = { id: string; channelId: string | null; command: string; aliases: string[]; prefix: string; responseText: string; enabled: boolean; requiredRole: string; cooldownSeconds: number; userCooldownSeconds: number; replyMode: string; usageCount: number; lastUsedAt: string | null; createdAt: string; updatedAt: string; archivedAt: string | null; };
+
 type OutgoingMessage = { id: string; sourceAppId: string; channelId: string; message: string; replyParentMessageId: string | null; priority: number; status: string; idempotencyKey: string; twitchMessageId: string | null; twitchIsSent: boolean | null; twitchDropReason: unknown; responseCode: number | null; responseBodyExcerpt: string | null; attempts: number; nextAttemptAt: string; lastError: string | null; createdAt: string; sentAt: string | null; failedAt: string | null; };
 
 type RegisteredApp = {
@@ -126,6 +128,8 @@ function App() {
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [outgoingMessages, setOutgoingMessages] = useState<OutgoingMessage[]>([]);
   const [outgoingStatus, setOutgoingStatus] = useState('');
+  const [textCommands, setTextCommands] = useState<TextCommand[]>([]);
+  const [commandForm, setCommandForm] = useState({ command: 'dc', aliases: 'discord', prefix: '!', responseText: 'Join the Discord: https://discord.gg/example', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
   const [form, setForm] = useState({
@@ -189,6 +193,7 @@ function App() {
     void loadChatLog().catch((loadError) => setError(String(loadError)));
     void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
     void loadOutgoingMessages().catch((loadError) => setError(String(loadError)));
+    void loadTextCommands().catch((loadError) => setError(String(loadError)));
   }, []);
 
   async function loadChatLog(search = chatSearch) {
@@ -205,6 +210,13 @@ function App() {
     if (!response.ok) throw new Error(`Webhook deliveries API returned ${response.status}`);
     const payload = await response.json();
     setWebhookDeliveries(payload.deliveries ?? []);
+  }
+
+  async function loadTextCommands() {
+    const response = await fetch('/api/admin/text-commands', { headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Text commands API returned ${response.status}`);
+    const payload = await response.json();
+    setTextCommands(payload.commands ?? []);
   }
 
   async function loadOutgoingMessages(status = outgoingStatus) {
@@ -229,6 +241,51 @@ function App() {
   }
 
 
+
+
+  async function createTextCommand() {
+    const response = await fetch('/api/admin/text-commands', {
+      method: 'POST',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        command: commandForm.command,
+        aliases: splitCsv(commandForm.aliases),
+        prefix: commandForm.prefix,
+        responseText: commandForm.responseText,
+        enabled: commandForm.enabled,
+        requiredRole: commandForm.requiredRole,
+        cooldownSeconds: Number(commandForm.cooldownSeconds),
+        userCooldownSeconds: Number(commandForm.userCooldownSeconds),
+        replyMode: commandForm.replyMode
+      })
+    });
+    if (!response.ok) throw new Error(`Create text command failed with ${response.status}`);
+    await loadTextCommands();
+  }
+
+  async function updateTextCommand(command: TextCommand, patch: Partial<TextCommand>) {
+    const response = await fetch(`/api/admin/text-commands/${command.id}`, {
+      method: 'PATCH',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(patch)
+    });
+    if (!response.ok) throw new Error(`Update text command failed with ${response.status}`);
+    await loadTextCommands();
+  }
+
+  async function deleteTextCommand(command: TextCommand) {
+    if (!window.confirm(`Delete text command ${command.prefix}${command.command}?`)) return;
+    const response = await fetch(`/api/admin/text-commands/${command.id}`, { method: 'DELETE', headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Delete text command failed with ${response.status}`);
+    await loadTextCommands();
+  }
+
+  async function testTextCommand(command: TextCommand) {
+    const response = await fetch(`/api/admin/text-commands/${command.id}/test`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ user: 'admin', displayName: 'Admin' }) });
+    if (!response.ok) throw new Error(`Test text command failed with ${response.status}`);
+    await loadTextCommands();
+    await loadOutgoingMessages();
+  }
 
   async function rotateWebhookSecret(appId: string) {
     const response = await fetch(`/api/admin/apps/${appId}/webhook-secret`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
@@ -364,11 +421,10 @@ function App() {
 
       <section className="content">
         <header className="hero" id="dashboard">
-          <p className="eyebrow">Phase 3 Twitch auth</p>
+          <p className="eyebrow">Phase 7 simple text commands</p>
           <h1>Admin operations</h1>
           <p>
-            Connect the dedicated Twitch bot account and broadcaster account, verify required scopes, and keep
-            downstream app registry controls ready for erwin-music and erwin-hatchery.
+            Connect Twitch accounts, manage downstream apps, and own safe static chat responses such as !dc without moving music-domain commands into the gateway.
           </p>
         </header>
 
@@ -495,6 +551,58 @@ function App() {
           </div>
         </section>
 
+
+        <section className="page-card" id="text-commands">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Gateway-owned static replies</p>
+              <h2>Text Commands</h2>
+              <p>Static text only. Safe placeholders: <code>{'{user}'}</code>, <code>{'{displayName}'}</code>, <code>{'{channel}'}</code>.</p>
+            </div>
+            <button onClick={() => void loadTextCommands().catch((loadError) => setError(String(loadError)))}>Refresh commands</button>
+          </div>
+
+          <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void createTextCommand().catch((createError) => setError(String(createError))); }}>
+            <label>Command<input value={commandForm.command} onChange={(event) => setCommandForm({ ...commandForm, command: event.target.value })} placeholder="dc" /></label>
+            <label>Aliases<input value={commandForm.aliases} onChange={(event) => setCommandForm({ ...commandForm, aliases: event.target.value })} placeholder="discord,youtube" /></label>
+            <label>Prefix<input value={commandForm.prefix} onChange={(event) => setCommandForm({ ...commandForm, prefix: event.target.value })} /></label>
+            <label>Response text<textarea value={commandForm.responseText} onChange={(event) => setCommandForm({ ...commandForm, responseText: event.target.value })} /></label>
+            <label>Required role<select value={commandForm.requiredRole} onChange={(event) => setCommandForm({ ...commandForm, requiredRole: event.target.value })}>{['everyone', 'subscriber', 'vip', 'moderator', 'broadcaster'].map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+            <label>Global cooldown seconds<input type="number" min="0" value={commandForm.cooldownSeconds} onChange={(event) => setCommandForm({ ...commandForm, cooldownSeconds: Number(event.target.value) })} /></label>
+            <label>User cooldown seconds<input type="number" min="0" value={commandForm.userCooldownSeconds} onChange={(event) => setCommandForm({ ...commandForm, userCooldownSeconds: Number(event.target.value) })} /></label>
+            <label>Reply mode<select value={commandForm.replyMode} onChange={(event) => setCommandForm({ ...commandForm, replyMode: event.target.value })}><option value="message">Normal message</option><option value="reply">Reply to chat message</option></select></label>
+            <label className="checkbox-label"><input type="checkbox" checked={commandForm.enabled} onChange={(event) => setCommandForm({ ...commandForm, enabled: event.target.checked })} /> Enabled</label>
+            <button type="submit">Create text command</button>
+          </form>
+
+          <div className="table-list">
+            {textCommands.map((command) => (
+              <article className="delivery-row" key={command.id}>
+                <div className="app-card-header">
+                  <div>
+                    <h3>{command.prefix}{command.command}</h3>
+                    <p>{command.responseText}</p>
+                  </div>
+                  <button onClick={() => void updateTextCommand(command, { enabled: !command.enabled }).catch((updateError) => setError(String(updateError)))}>{command.enabled ? 'Disable' : 'Enable'}</button>
+                </div>
+                <div className="chips">
+                  {command.aliases.map((alias) => <span key={alias}>{command.prefix}{alias}</span>)}
+                  <span>role {command.requiredRole}</span>
+                  <span>global cooldown {command.cooldownSeconds}s</span>
+                  <span>user cooldown {command.userCooldownSeconds}s</span>
+                  <span>{command.replyMode}</span>
+                  <span>used {command.usageCount}</span>
+                  <span>last {command.lastUsedAt ?? 'never'}</span>
+                </div>
+                <div className="button-row">
+                  <button onClick={() => void testTextCommand(command).catch((testError) => setError(String(testError)))}>Test</button>
+                  <button onClick={() => void deleteTextCommand(command).catch((deleteError) => setError(String(deleteError)))}>Delete</button>
+                </div>
+              </article>
+            ))}
+            {textCommands.length === 0 ? <p>No text commands configured yet. Create <code>!dc</code> above to move a Discord link into the gateway.</p> : null}
+          </div>
+        </section>
 
         <section className="page-card twitch-panel" id="diagnostics">
           <div className="section-heading">
@@ -623,7 +731,7 @@ function App() {
           </div>
         </section>
 
-        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Diagnostics', 'Chat Log', 'Outgoing Messages', 'Webhook Deliveries'].includes(page)).map((page) => (
+        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Text Commands', 'Diagnostics', 'Chat Log', 'Outgoing Messages', 'Webhook Deliveries'].includes(page)).map((page) => (
           <section className="page-card placeholder" id={page.toLowerCase().replaceAll(' ', '-')} key={page}>
             <h2>{page}</h2>
             <p>Operational controls for this area arrive in later phases.</p>

@@ -271,6 +271,47 @@ export const outgoingChatAttempts = pgTable('outgoing_chat_attempts', {
   uniqueIndex('outgoing_chat_attempts_number_idx').on(table.outgoingChatMessageId, table.attemptNumber)
 ]);
 
+
+export const textCommands = pgTable('text_commands', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  channelId: uuid('channel_id').references(() => twitchChannels.id),
+  command: text('command').notNull(),
+  aliases: jsonb('aliases_json').$type<string[]>().notNull().default([]),
+  prefix: varchar('prefix', { length: 8 }).notNull().default('!'),
+  responseText: text('response_text').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  requiredRole: varchar('required_role', { length: 32 }).notNull().default('everyone'),
+  cooldownSeconds: integer('cooldown_seconds').notNull().default(0),
+  userCooldownSeconds: integer('user_cooldown_seconds').notNull().default(0),
+  replyMode: varchar('reply_mode', { length: 32 }).notNull().default('message'),
+  usageCount: integer('usage_count').notNull().default(0),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  createdByAdminId: uuid('created_by_admin_id').references(() => adminUsers.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  archivedAt: timestamp('archived_at', { withTimezone: true })
+}, (table) => [
+  index('text_commands_channel_prefix_idx').on(table.channelId, table.prefix),
+  index('text_commands_enabled_idx').on(table.enabled)
+]);
+
+export const textCommandInvocations = pgTable('text_command_invocations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  textCommandId: uuid('text_command_id').notNull().references(() => textCommands.id),
+  twitchMessageId: text('twitch_message_id'),
+  channelId: uuid('channel_id').references(() => twitchChannels.id),
+  userId: text('user_id'),
+  userLogin: text('user_login'),
+  status: varchar('status', { length: 32 }).notNull(),
+  dropReason: text('drop_reason'),
+  queuedChatMessageId: uuid('queued_chat_message_id').references(() => outgoingChatMessages.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  index('text_command_invocations_command_created_idx').on(table.textCommandId, table.createdAt),
+  index('text_command_invocations_user_created_idx').on(table.textCommandId, table.userId, table.createdAt),
+  index('text_command_invocations_status_idx').on(table.status)
+]);
+
 export const idempotencyKeys = pgTable('idempotency_keys', {
   id: uuid('id').primaryKey().defaultRandom(),
   sourceAppId: uuid('source_app_id').notNull().references(() => apps.id),
