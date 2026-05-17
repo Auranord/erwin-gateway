@@ -1,0 +1,30 @@
+{
+  "name": "erwin-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Central integration gateway for NTKOH apps.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @erwin-gateway/api",
+    "dev:api": "npm run dev --workspace @erwin-gateway/api",
+    "dev:web": "npm run dev --workspace @erwin-gateway/web",
+    "typecheck": "npm run build --workspace @erwin-gateway/shared && npm run typecheck --workspace @erwin-gateway/api && npm run typecheck --workspace @erwin-gateway/web",
+    "build": "npm run build --workspace @erwin-gateway/shared && npm run build --workspace @erwin-gateway/api && npm run build --workspace @erwin-gateway/web",
+    "start": "npm run start --workspace @erwin-gateway/api",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config drizzle.config.ts"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "drizzle-kit": "^0.31.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
