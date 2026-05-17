@@ -34,6 +34,17 @@ type TwitchAccountStatus = {
   lastRefreshError: string | null;
 };
 
+type EventSubStatus = {
+  callbackUrl: string | null;
+  lastDelivery: { messageId: string; messageType: string; eventType: string | null; receivedAt: string; duplicate: boolean } | null;
+  subscriptions: Array<{ id: string; twitchSubscriptionId: string | null; type: string; version: string; status: string; revokedAt: string | null; revokeReason: string | null; lastSyncedAt: string | null }>;
+  missingSubscriptions: Array<{ type: string; version: string; condition: Record<string, string> }>;
+  revokedSubscriptions: Array<{ type: string; status: string; revokeReason: string | null; twitchSubscriptionId: string | null }>;
+  duplicateCount: number;
+  desiredError: string | null;
+  healthy: boolean;
+};
+
 type TwitchSetupStatus = {
   status: 'healthy' | 'degraded';
   appToken: { configured: boolean; valid: boolean; expiresAt: string | null; error: string | null };
@@ -101,6 +112,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [newRawKey, setNewRawKey] = useState<string | null>(null);
   const [twitchStatus, setTwitchStatus] = useState<TwitchSetupStatus | null>(null);
+  const [eventSubStatus, setEventSubStatus] = useState<EventSubStatus | null>(null);
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
   const [form, setForm] = useState({
@@ -133,6 +145,8 @@ function App() {
       const response = await fetch('/api/admin/twitch/setup/status', { headers: adminHeaders() });
       if (!response.ok) throw new Error(`Twitch status API returned ${response.status}`);
       setTwitchStatus(await response.json());
+      const eventSubResponse = await fetch('/api/admin/twitch/eventsub/status', { headers: adminHeaders() });
+      if (eventSubResponse.ok) setEventSubStatus(await eventSubResponse.json());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load Twitch setup');
     } finally {
@@ -211,6 +225,16 @@ function App() {
     if (!response.ok) throw new Error(`Start Twitch ${role} login failed with ${response.status}`);
     const payload = await response.json();
     window.location.assign(payload.authorizationUrl);
+  }
+
+  async function syncEventSub() {
+    const response = await fetch('/api/admin/twitch/eventsub/sync', {
+      method: 'POST',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({})
+    });
+    if (!response.ok) throw new Error(`EventSub sync failed with ${response.status}`);
+    await loadTwitchStatus();
   }
 
   async function refreshTwitchTokens() {
@@ -394,7 +418,48 @@ function App() {
           </div>
         </section>
 
-        {pages.filter((page) => page !== 'Dashboard' && page !== 'Apps' && page !== 'Twitch Setup').map((page) => (
+
+        <section className="page-card twitch-panel" id="diagnostics">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Diagnostics</p>
+              <h2>Twitch EventSub status</h2>
+            </div>
+            <div className="button-row">
+              <button onClick={() => void loadTwitchStatus()}>Refresh diagnostics</button>
+              <button onClick={() => void syncEventSub().catch((syncError) => setError(String(syncError)))}>Sync EventSub</button>
+            </div>
+          </div>
+          {eventSubStatus ? (
+            <div className={eventSubStatus.healthy ? 'eventsub healthy' : 'eventsub degraded'}>
+              <p><strong>Callback:</strong> {eventSubStatus.callbackUrl ?? 'not configured'}</p>
+              <p><strong>Last delivery:</strong> {eventSubStatus.lastDelivery ? `${eventSubStatus.lastDelivery.eventType ?? eventSubStatus.lastDelivery.messageType} at ${eventSubStatus.lastDelivery.receivedAt}` : 'none recorded'}</p>
+              <p><strong>Duplicates:</strong> {eventSubStatus.duplicateCount}</p>
+              {eventSubStatus.desiredError ? <p className="error">Desired-state error: {eventSubStatus.desiredError}</p> : null}
+              <div className="diagnostic-grid">
+                <article>
+                  <h3>Subscriptions</h3>
+                  {eventSubStatus.subscriptions.length ? eventSubStatus.subscriptions.map((subscription) => (
+                    <div className="diagnostic-row" key={subscription.id}>
+                      <span>{subscription.type} v{subscription.version}</span>
+                      <span>{subscription.status}</span>
+                    </div>
+                  )) : <p>No local EventSub subscriptions recorded.</p>}
+                </article>
+                <article>
+                  <h3>Missing desired subscriptions</h3>
+                  {eventSubStatus.missingSubscriptions.length ? eventSubStatus.missingSubscriptions.map((subscription) => <code key={`${subscription.type}-${JSON.stringify(subscription.condition)}`}>{subscription.type}</code>) : <p>None</p>}
+                </article>
+                <article>
+                  <h3>Revoked/unhealthy subscriptions</h3>
+                  {eventSubStatus.revokedSubscriptions.length ? eventSubStatus.revokedSubscriptions.map((subscription) => <code key={`${subscription.twitchSubscriptionId}-${subscription.type}`}>{subscription.type}: {subscription.status}</code>) : <p>None</p>}
+                </article>
+              </div>
+            </div>
+          ) : <p>EventSub diagnostics have not loaded yet.</p>}
+        </section>
+
+        {pages.filter((page) => page !== 'Dashboard' && page !== 'Apps' && page !== 'Twitch Setup' && page !== 'Diagnostics').map((page) => (
           <section className="page-card placeholder" id={page.toLowerCase().replaceAll(' ', '-')} key={page}>
             <h2>{page}</h2>
             <p>Operational controls for this area arrive in later phases.</p>

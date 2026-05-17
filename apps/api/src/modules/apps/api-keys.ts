@@ -31,7 +31,7 @@ export function generateAppApiKey(config: AppConfig) {
 
 export function extractKeyPrefix(rawKey: string): string | null {
   const parts = rawKey.split('_');
-  if (parts.length !== 4 || parts[0] !== 'egw' || !['dev', 'live'].includes(parts[1])) {
+  if (parts.length !== 4 || parts[0] !== 'egw' || !['dev', 'live'].includes(parts[1]!)) {
     return null;
   }
 

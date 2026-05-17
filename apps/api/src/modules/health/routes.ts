@@ -4,6 +4,7 @@ import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
 import type { HealthResponse } from '@erwin-gateway/shared';
 import { getTwitchSetupStatus } from '../twitch/service.js';
+import { getEventSubDiagnostics } from '../twitch-eventsub/service.js';
 
 interface HealthRouteOptions {
   config: AppConfig;
@@ -65,7 +66,7 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
       database: 'not_configured',
       migrations: 'phase_3_twitch_auth_expected',
       workers: { twitchTokenRefresh: Boolean(options.db) },
-      eventSub: 'not_implemented_in_phase_3',
+      eventSub: 'not_checked',
       queues: 'pending_later_phase'
     };
 
@@ -100,6 +101,19 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
           degradedReasons: twitch.degradedReasons
         };
         if (twitch.status === 'degraded') status = 'degraded';
+
+        const eventSub = await getEventSubDiagnostics(options.db, options.config);
+        checks.eventSub = {
+          status: eventSub.healthy ? 'healthy' : 'degraded',
+          callbackUrl: eventSub.callbackUrl,
+          lastDelivery: eventSub.lastDelivery,
+          subscriptionCount: eventSub.subscriptions.length,
+          missingSubscriptions: eventSub.missingSubscriptions,
+          revokedSubscriptions: eventSub.revokedSubscriptions,
+          duplicateCount: eventSub.duplicateCount,
+          desiredError: eventSub.desiredError
+        };
+        if (!eventSub.healthy) status = 'degraded';
       } catch (error) {
         checks.twitch = { status: 'degraded', error: error instanceof Error ? error.message : 'unknown Twitch health error' };
         status = 'degraded';

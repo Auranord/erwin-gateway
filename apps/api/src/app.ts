@@ -12,6 +12,8 @@ import { registerAdminApiRoutes } from './modules/admin/routes.js';
 import { registerHealthRoutes } from './modules/health/routes.js';
 import { registerAppApiRoutes } from './modules/apps/routes.js';
 import { startTwitchTokenWorker } from './modules/twitch/worker.js';
+import { registerTwitchEventSubRoutes } from './modules/twitch-eventsub/routes.js';
+import { startEventSubReconciliationWorker } from './modules/twitch-eventsub/worker.js';
 
 interface BuildAppOptions {
   config: AppConfig;
@@ -34,10 +36,21 @@ export async function buildApp(options: BuildAppOptions) {
     credentials: true
   });
 
-  await registerHealthRoutes(app, { config, pool, db: options.db });
-  await registerAppApiRoutes(app, { config, db: options.db });
-  await registerAdminApiRoutes(app, { config, db: options.db });
-  startTwitchTokenWorker(app, config, options.db);
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    (request.raw as any).rawBody = body;
+    try {
+      done(null, body.length ? JSON.parse(body.toString('utf8')) : {});
+    } catch (error) {
+      done(error as Error);
+    }
+  });
+
+  await registerHealthRoutes(app as any, { config, pool, db: options.db });
+  await registerAppApiRoutes(app as any, { config, db: options.db });
+  await registerAdminApiRoutes(app as any, { config, db: options.db });
+  await registerTwitchEventSubRoutes(app as any, { config, db: options.db });
+  startTwitchTokenWorker(app as any, config, options.db);
+  startEventSubReconciliationWorker(app as any, config, options.db);
 
   const webDist = path.resolve(dirname, '../../../web/dist');
   const hasWebDist = fs.existsSync(webDist);
