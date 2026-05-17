@@ -4,7 +4,7 @@ import { buildApp } from './app.js';
 
 const config = loadConfig();
 const database = createDatabase(config);
-const app = await buildApp({ config, pool: database?.pool });
+const app = await buildApp({ config, pool: database?.pool, db: database?.db });
 
 const shutdown = async (signal: NodeJS.Signals) => {
   app.log.info({ signal }, 'shutting down erwin-gateway');
