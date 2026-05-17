@@ -3,10 +3,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
-import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints } from '../../db/schema.js';
+import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints, events, webhookDeliveries } from '../../db/schema.js';
 import { generateAppApiKey } from '../apps/api-keys.js';
 import { appPermissions, defaultAppPermissions, normalizePermissions } from '../apps/permissions.js';
 import { registerTwitchAdminRoutes } from '../twitch/routes.js';
+import { deliverWebhookNow, generateWebhookSecret, getWebhookDeliveryWithAttempts, listChatLog, listWebhookDeliveries } from '../webhooks/service.js';
 
 const adminPages = [
   'Dashboard',
@@ -93,6 +94,7 @@ function serializeWebhook(webhook: typeof appWebhookEndpoints.$inferSelect | und
         enabled: webhook.enabled,
         eventFilters: webhook.eventFilters,
         lastDeliveryAt: webhook.lastDeliveryAt?.toISOString() ?? null,
+        signingSecretConfigured: Boolean(webhook.signingSecret || webhook.secretHash),
         createdAt: webhook.createdAt.toISOString(),
         updatedAt: webhook.updatedAt.toISOString()
       }
@@ -103,6 +105,7 @@ function serializeWebhook(webhook: typeof appWebhookEndpoints.$inferSelect | und
         enabled: false,
         eventFilters: [],
         lastDeliveryAt: null,
+        signingSecretConfigured: false,
         createdAt: null,
         updatedAt: null
       };
@@ -156,7 +159,7 @@ async function upsertDefaultWebhook(db: Database, appId: string, webhookUrl?: st
   };
 
   if (existing) {
-    await db.update(appWebhookEndpoints).set(values).where(eq(appWebhookEndpoints.id, existing.id));
+    await db.update(appWebhookEndpoints).set({ ...values, signingSecret: existing.signingSecret ?? generateWebhookSecret() }).where(eq(appWebhookEndpoints.id, existing.id));
     return;
   }
 
@@ -165,7 +168,8 @@ async function upsertDefaultWebhook(db: Database, appId: string, webhookUrl?: st
     name: 'default',
     url,
     enabled: Boolean(url),
-    eventFilters: eventFilters ?? []
+    eventFilters: eventFilters ?? [],
+    signingSecret: generateWebhookSecret()
   });
 }
 
@@ -306,6 +310,78 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
       rawKey: generated.rawKey,
       rawKeyShownOnlyOnce: true
     });
+  });
+
+
+
+
+
+  app.post('/api/admin/apps/:id/webhook-secret', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid app id' });
+    const [record] = await options.db.select().from(apps).where(eq(apps.id, params.data.id)).limit(1);
+    if (!record) return reply.code(404).send({ error: 'App not found' });
+    const webhook = await getFirstWebhook(options.db, record.id);
+    if (!webhook) return reply.code(404).send({ error: 'Webhook not found' });
+    const rawSecret = generateWebhookSecret();
+    const [updated] = await options.db.update(appWebhookEndpoints).set({ signingSecret: rawSecret, updatedAt: new Date() }).where(eq(appWebhookEndpoints.id, webhook.id)).returning();
+    await audit(options.db, 'app_webhook_secret.rotate', 'app_webhook_endpoint', webhook.id, { appId: record.id });
+    return { webhook: serializeWebhook(updated), rawSecret, rawSecretShownOnlyOnce: true };
+  });
+
+  app.post('/api/admin/apps/:id/webhook-test', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid app id' });
+    const [record] = await options.db.select().from(apps).where(eq(apps.id, params.data.id)).limit(1);
+    if (!record) return reply.code(404).send({ error: 'App not found' });
+    const webhook = await getFirstWebhook(options.db, record.id);
+    if (!webhook?.url || !webhook.enabled) return reply.code(400).send({ error: 'App webhook is not enabled' });
+    const [event] = await options.db.insert(events).values({
+      source: 'admin',
+      type: 'gateway.webhook.test',
+      externalId: `webhook-test-${Date.now()}`,
+      payload: { test: true, app_id: record.id, message: 'Webhook test from erwin-gateway' },
+      status: 'processed',
+      processedAt: new Date()
+    }).returning();
+    if (!event) return reply.code(500).send({ error: 'Test event was not created' });
+    const [delivery] = await options.db.insert(webhookDeliveries).values({ appId: record.id, endpointId: webhook.id, eventId: event.id, status: 'queued', payload: { schema: 'erwin.gateway.webhook.v1', delivery_id: null, event_id: event.id, type: event.type, occurred_at: event.occurredAt.toISOString(), received_at: event.createdAt.toISOString(), test: true, app_id: record.id, message: 'Webhook test from erwin-gateway' } }).returning();
+    if (!delivery) return reply.code(500).send({ error: 'Test delivery was not created' });
+    return { delivery: await deliverWebhookNow(options.db, delivery.id, true) };
+  });
+
+  app.get('/api/admin/chat/log', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const query = z.object({ q: z.string().optional(), command: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    return { messages: await listChatLog(options.db, query.data) };
+  });
+
+  app.get('/api/admin/webhook-deliveries', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const query = z.object({ status: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    return { deliveries: await listWebhookDeliveries(options.db, query.data) };
+  });
+
+  app.get('/api/admin/webhook-deliveries/:deliveryId', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ deliveryId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid delivery id' });
+    const result = await getWebhookDeliveryWithAttempts(options.db, params.data.deliveryId);
+    if (!result) return reply.code(404).send({ error: 'Delivery not found' });
+    return result;
+  });
+
+  app.post('/api/admin/webhook-deliveries/:deliveryId/retry', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ deliveryId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid delivery id' });
+    const delivery = await deliverWebhookNow(options.db, params.data.deliveryId, true);
+    if (!delivery) return reply.code(404).send({ error: 'Delivery not found' });
+    return { delivery };
   });
 
   await registerTwitchAdminRoutes(app, options);

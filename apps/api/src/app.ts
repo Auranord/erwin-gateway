@@ -14,6 +14,7 @@ import { registerAppApiRoutes } from './modules/apps/routes.js';
 import { startTwitchTokenWorker } from './modules/twitch/worker.js';
 import { registerTwitchEventSubRoutes } from './modules/twitch-eventsub/routes.js';
 import { startEventSubReconciliationWorker } from './modules/twitch-eventsub/worker.js';
+import { startWebhookDeliveryWorker } from './modules/webhooks/service.js';
 
 interface BuildAppOptions {
   config: AppConfig;
@@ -51,6 +52,7 @@ export async function buildApp(options: BuildAppOptions) {
   await registerTwitchEventSubRoutes(app as any, { config, db: options.db });
   startTwitchTokenWorker(app as any, config, options.db);
   startEventSubReconciliationWorker(app as any, config, options.db);
+  startWebhookDeliveryWorker(app as any, options.db);
 
   const webDist = path.resolve(dirname, '../../../web/dist');
   const hasWebDist = fs.existsSync(webDist);

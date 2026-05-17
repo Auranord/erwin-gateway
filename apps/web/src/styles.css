@@ -405,3 +405,9 @@ code {
   border-left: 4px solid #22c55e;
   padding-left: 1rem;
 }
+.table-list { display: grid; gap: 0.85rem; }
+.log-row, .delivery-row, .delivery-status { border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 12px; padding: 0.85rem; background: rgba(15, 23, 42, 0.55); }
+.log-row p, .delivery-row p { margin: 0.35rem 0; }
+.delivery-row code { display: block; margin-top: 0.25rem; overflow-wrap: anywhere; }
+.delivery-status { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.75rem 0; }
+.button-row input { min-width: 220px; }

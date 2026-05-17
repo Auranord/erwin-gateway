@@ -69,6 +69,7 @@ export const appWebhookEndpoints = pgTable('app_webhook_endpoints', {
   enabled: boolean('enabled').notNull().default(false),
   eventFilters: jsonb('event_filters_json').$type<string[]>().notNull().default([]),
   secretHash: text('secret_hash'),
+  signingSecret: text('signing_secret'),
   lastDeliveryAt: timestamp('last_delivery_at', { withTimezone: true }),
   ...timestamps
 }, (table) => [index('app_webhook_endpoints_app_id_idx').on(table.appId)]);
@@ -189,6 +190,70 @@ export const events = pgTable('events', {
   index('events_status_idx').on(table.status),
   index('events_type_idx').on(table.type),
   index('events_occurred_at_idx').on(table.occurredAt)
+]);
+
+
+export const twitchChatMessages = pgTable('twitch_chat_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  twitchMessageId: text('twitch_message_id').notNull(),
+  channelId: uuid('channel_id').references(() => twitchChannels.id),
+  chatterUserId: text('chatter_user_id'),
+  chatterLogin: text('chatter_login'),
+  chatterDisplayName: text('chatter_display_name'),
+  text: text('text').notNull(),
+  fragments: jsonb('fragments_json').$type<unknown[]>().notNull().default([]),
+  badges: jsonb('badges_json').$type<unknown[]>().notNull().default([]),
+  color: text('color'),
+  isBroadcaster: boolean('is_broadcaster').notNull().default(false),
+  isMod: boolean('is_mod').notNull().default(false),
+  isVip: boolean('is_vip').notNull().default(false),
+  isSubscriber: boolean('is_subscriber').notNull().default(false),
+  isCommand: boolean('is_command').notNull().default(false),
+  commandSymbol: varchar('command_symbol', { length: 8 }),
+  commandName: text('command_name'),
+  commandArgsText: text('command_args_text'),
+  commandArgs: jsonb('command_args_json').$type<string[]>().notNull().default([]),
+  replyParentMessageId: text('reply_parent_message_id'),
+  moderationState: text('moderation_state'),
+  rawEventId: uuid('raw_event_id').references(() => twitchEventsubMessages.id),
+  eventId: uuid('event_id').references(() => events.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex('twitch_chat_messages_twitch_message_id_idx').on(table.twitchMessageId),
+  index('twitch_chat_messages_channel_created_idx').on(table.channelId, table.createdAt),
+  index('twitch_chat_messages_command_idx').on(table.commandName)
+]);
+
+export const webhookDeliveries = pgTable('webhook_deliveries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  appId: uuid('app_id').notNull().references(() => apps.id),
+  endpointId: uuid('endpoint_id').notNull().references(() => appWebhookEndpoints.id),
+  eventId: uuid('event_id').notNull().references(() => events.id),
+  status: varchar('status', { length: 32 }).notNull().default('queued'),
+  attempts: integer('attempts').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  lastError: text('last_error'),
+  payload: jsonb('payload_json').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true })
+}, (table) => [
+  uniqueIndex('webhook_deliveries_endpoint_event_idx').on(table.endpointId, table.eventId),
+  index('webhook_deliveries_status_next_attempt_idx').on(table.status, table.nextAttemptAt),
+  index('webhook_deliveries_event_idx').on(table.eventId)
+]);
+
+export const webhookDeliveryAttempts = pgTable('webhook_delivery_attempts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deliveryId: uuid('delivery_id').notNull().references(() => webhookDeliveries.id),
+  attemptNumber: integer('attempt_number').notNull(),
+  statusCode: integer('status_code'),
+  durationMs: integer('duration_ms').notNull(),
+  responseExcerpt: text('response_excerpt'),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  index('webhook_delivery_attempts_delivery_idx').on(table.deliveryId),
+  uniqueIndex('webhook_delivery_attempts_number_idx').on(table.deliveryId, table.attemptNumber)
 ]);
 
 export const healthCheckSnapshots = pgTable('health_check_snapshots', {
