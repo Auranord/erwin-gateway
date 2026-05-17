@@ -224,6 +224,84 @@ export const twitchChatMessages = pgTable('twitch_chat_messages', {
   index('twitch_chat_messages_command_idx').on(table.commandName)
 ]);
 
+
+export const outgoingChatMessages = pgTable('outgoing_chat_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sourceAppId: uuid('source_app_id').notNull().references(() => apps.id),
+  channelId: uuid('channel_id').notNull().references(() => twitchChannels.id),
+  message: text('message').notNull(),
+  replyParentMessageId: text('reply_parent_message_id'),
+  forSourceOnly: boolean('for_source_only').notNull().default(true),
+  priority: integer('priority').notNull().default(0),
+  status: varchar('status', { length: 32 }).notNull().default('queued'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  twitchMessageId: text('twitch_message_id'),
+  twitchIsSent: boolean('twitch_is_sent'),
+  twitchDropReason: jsonb('twitch_drop_reason_json'),
+  responseCode: integer('response_code'),
+  responseBodyExcerpt: text('response_body_excerpt'),
+  rateLimit: jsonb('rate_limit_json').$type<Record<string, string | null>>().notNull().default({}),
+  attempts: integer('attempts').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  failedAt: timestamp('failed_at', { withTimezone: true })
+}, (table) => [
+  uniqueIndex('outgoing_chat_messages_app_idempotency_idx').on(table.sourceAppId, table.idempotencyKey),
+  index('outgoing_chat_messages_status_next_attempt_idx').on(table.status, table.nextAttemptAt),
+  index('outgoing_chat_messages_channel_created_idx').on(table.channelId, table.createdAt),
+  index('outgoing_chat_messages_source_app_idx').on(table.sourceAppId)
+]);
+
+export const outgoingChatAttempts = pgTable('outgoing_chat_attempts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  outgoingChatMessageId: uuid('outgoing_chat_message_id').notNull().references(() => outgoingChatMessages.id),
+  attemptNumber: integer('attempt_number').notNull(),
+  request: jsonb('request_json').notNull().default({}),
+  responseCode: integer('response_code'),
+  responseJson: jsonb('response_json'),
+  responseBodyExcerpt: text('response_body_excerpt'),
+  error: text('error'),
+  rateLimit: jsonb('rate_limit_json').$type<Record<string, string | null>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  index('outgoing_chat_attempts_message_idx').on(table.outgoingChatMessageId),
+  uniqueIndex('outgoing_chat_attempts_number_idx').on(table.outgoingChatMessageId, table.attemptNumber)
+]);
+
+export const idempotencyKeys = pgTable('idempotency_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sourceAppId: uuid('source_app_id').notNull().references(() => apps.id),
+  scope: varchar('scope', { length: 80 }).notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  resourceType: varchar('resource_type', { length: 80 }).notNull(),
+  resourceId: uuid('resource_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true })
+}, (table) => [
+  uniqueIndex('idempotency_keys_app_scope_key_idx').on(table.sourceAppId, table.scope, table.idempotencyKey),
+  index('idempotency_keys_resource_idx').on(table.resourceType, table.resourceId)
+]);
+
+export const rateLimitBuckets = pgTable('rate_limit_buckets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  bucketType: varchar('bucket_type', { length: 64 }).notNull(),
+  bucketKey: text('bucket_key').notNull(),
+  limit: integer('limit'),
+  remaining: integer('remaining'),
+  resetAt: timestamp('reset_at', { withTimezone: true }),
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+  metadata: jsonb('metadata_json').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex('rate_limit_buckets_type_key_idx').on(table.bucketType, table.bucketKey),
+  index('rate_limit_buckets_reset_idx').on(table.resetAt)
+]);
+
 export const webhookDeliveries = pgTable('webhook_deliveries', {
   id: uuid('id').primaryKey().defaultRandom(),
   appId: uuid('app_id').notNull().references(() => apps.id),

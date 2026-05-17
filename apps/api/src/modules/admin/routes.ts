@@ -7,6 +7,7 @@ import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints, events, webhookDe
 import { generateAppApiKey } from '../apps/api-keys.js';
 import { appPermissions, defaultAppPermissions, normalizePermissions } from '../apps/permissions.js';
 import { registerTwitchAdminRoutes } from '../twitch/routes.js';
+import { getOutgoingChatMessage, listOutgoingChatMessages, retryOutgoingChatMessage } from '../twitch-chat/service.js';
 import { deliverWebhookNow, generateWebhookSecret, getWebhookDeliveryWithAttempts, listChatLog, listWebhookDeliveries } from '../webhooks/service.js';
 
 const adminPages = [
@@ -357,6 +358,38 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     const query = z.object({ q: z.string().optional(), command: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
     return { messages: await listChatLog(options.db, query.data) };
+  });
+
+
+  app.get('/api/admin/outgoing-chat/messages', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const query = z.object({
+      status: z.string().optional(),
+      from: z.coerce.date().optional(),
+      to: z.coerce.date().optional(),
+      limit: z.coerce.number().int().positive().optional()
+    }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    return { messages: await listOutgoingChatMessages(options.db, query.data) };
+  });
+
+  app.get('/api/admin/outgoing-chat/messages/:messageId', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ messageId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid message id' });
+    const result = await getOutgoingChatMessage(options.db, params.data.messageId);
+    if (!result) return reply.code(404).send({ error: 'Message not found' });
+    return result;
+  });
+
+  app.post('/api/admin/outgoing-chat/messages/:messageId/retry', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ messageId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid message id' });
+    const message = await retryOutgoingChatMessage(options.db, options.config, params.data.messageId);
+    if (!message) return reply.code(404).send({ error: 'Message not found' });
+    await audit(options.db, 'outgoing_chat.retry', 'outgoing_chat_message', message.id, { status: message.status });
+    return { message };
   });
 
   app.get('/api/admin/webhook-deliveries', async (request, reply) => {

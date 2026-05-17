@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
 import { appApiKeys, apps } from '../../db/schema.js';
+import { createOutgoingChatMessage, getOutgoingChatMessage, listOutgoingChatMessages } from '../twitch-chat/service.js';
 import { deliverWebhookNow, getEvent, getWebhookDeliveryWithAttempts, listChatLog, listEvents, listWebhookDeliveries } from '../webhooks/service.js';
 import { z } from 'zod';
 import { extractKeyPrefix, hashAppApiKey, safeCompareHashes } from './api-keys.js';
@@ -139,6 +140,48 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
     const query = z.object({ q: z.string().optional(), command: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
     return { messages: await listChatLog(options.db, query.data) };
+  });
+
+
+  app.post('/api/v1/chat/messages', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
+    const body = z.object({
+      channel_id: z.string().uuid().optional(),
+      channel_login: z.string().min(1).max(80).optional(),
+      broadcaster_user_id: z.string().min(1).max(80).optional(),
+      message: z.string().min(1).max(500),
+      reply_parent_message_id: z.string().max(128).optional().nullable(),
+      for_source_only: z.boolean().optional(),
+      idempotency_key: z.string().min(8).max(200),
+      priority: z.number().int().min(-100).max(100).optional()
+    }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: 'Invalid outgoing chat message', issues: body.error.issues });
+    const result = await createOutgoingChatMessage(options.db, authenticatedApp, body.data);
+    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error, issues: result.issues });
+    if (result.idempotencyConflict) return reply.code(409).send({ error: 'Idempotency key was already used for different message parameters', message: result.message });
+    return reply.code(result.duplicate ? 200 : 202).send({ message: result.message, duplicate: result.duplicate });
+  });
+
+  app.get('/api/v1/chat/messages', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const query = z.object({
+      status: z.string().optional(),
+      from: z.coerce.date().optional(),
+      to: z.coerce.date().optional(),
+      limit: z.coerce.number().int().positive().optional()
+    }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    return { messages: await listOutgoingChatMessages(options.db, query.data) };
+  });
+
+  app.get('/api/v1/chat/messages/:id', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
+    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid message id' });
+    const result = await getOutgoingChatMessage(options.db, params.data.id);
+    if (!result) return reply.code(404).send({ error: 'Message not found' });
+    return result;
   });
 
   app.get('/api/v1/webhook-deliveries', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {

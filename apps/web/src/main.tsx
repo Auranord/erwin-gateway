@@ -59,6 +59,8 @@ type ChatMessage = { id: string; chatterLogin: string | null; chatterDisplayName
 
 type WebhookDelivery = { id: string; appId: string; endpointId: string; eventId: string; status: string; attempts: number; nextAttemptAt: string; lastError: string | null; deliveredAt: string | null; createdAt: string; };
 
+type OutgoingMessage = { id: string; sourceAppId: string; channelId: string; message: string; replyParentMessageId: string | null; priority: number; status: string; idempotencyKey: string; twitchMessageId: string | null; twitchIsSent: boolean | null; twitchDropReason: unknown; responseCode: number | null; responseBodyExcerpt: string | null; attempts: number; nextAttemptAt: string; lastError: string | null; createdAt: string; sentAt: string | null; failedAt: string | null; };
+
 type RegisteredApp = {
   id: string;
   name: string;
@@ -122,6 +124,8 @@ function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatSearch, setChatSearch] = useState('');
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
+  const [outgoingMessages, setOutgoingMessages] = useState<OutgoingMessage[]>([]);
+  const [outgoingStatus, setOutgoingStatus] = useState('');
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
   const [form, setForm] = useState({
@@ -184,6 +188,7 @@ function App() {
     void loadTwitchStatus();
     void loadChatLog().catch((loadError) => setError(String(loadError)));
     void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
+    void loadOutgoingMessages().catch((loadError) => setError(String(loadError)));
   }, []);
 
   async function loadChatLog(search = chatSearch) {
@@ -202,10 +207,25 @@ function App() {
     setWebhookDeliveries(payload.deliveries ?? []);
   }
 
+  async function loadOutgoingMessages(status = outgoingStatus) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (status) params.set('status', status);
+    const response = await fetch(`/api/admin/outgoing-chat/messages?${params}`, { headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Outgoing messages API returned ${response.status}`);
+    const payload = await response.json();
+    setOutgoingMessages(payload.messages ?? []);
+  }
+
   async function retryWebhookDelivery(deliveryId: string) {
     const response = await fetch(`/api/admin/webhook-deliveries/${deliveryId}/retry`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
     if (!response.ok) throw new Error(`Retry delivery failed with ${response.status}`);
     await loadWebhookDeliveries();
+  }
+
+  async function retryOutgoingMessage(messageId: string) {
+    const response = await fetch(`/api/admin/outgoing-chat/messages/${messageId}/retry`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
+    if (!response.ok) throw new Error(`Retry outgoing message failed with ${response.status}`);
+    await loadOutgoingMessages();
   }
 
 
@@ -545,6 +565,43 @@ function App() {
           </div>
         </section>
 
+
+        <section className="page-card" id="outgoing-messages">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Gateway-owned send queue</p>
+              <h2>Outgoing Messages</h2>
+            </div>
+            <div className="button-row">
+              <select value={outgoingStatus} onChange={(event) => { setOutgoingStatus(event.target.value); void loadOutgoingMessages(event.target.value).catch((loadError) => setError(String(loadError))); }}>
+                <option value="">All statuses</option>
+                {['queued', 'sending', 'sent', 'dropped', 'failed', 'retrying', 'dead_lettered'].map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+              <button onClick={() => void loadOutgoingMessages().catch((loadError) => setError(String(loadError)))}>Refresh messages</button>
+            </div>
+          </div>
+          <div className="table-list">
+            {outgoingMessages.map((message) => (
+              <article className="delivery-row" key={message.id}>
+                <div><strong>{message.status}</strong> <code>{message.id}</code></div>
+                <p>{message.message}</p>
+                <div className="chips">
+                  <span>attempts {message.attempts}</span>
+                  <span>priority {message.priority}</span>
+                  <span>idempotency {message.idempotencyKey}</span>
+                  {message.responseCode ? <span>HTTP {message.responseCode}</span> : null}
+                  {message.twitchMessageId ? <span>Twitch {message.twitchMessageId}</span> : null}
+                </div>
+                {message.twitchDropReason ? <pre className="json-block">drop_reason: {JSON.stringify(message.twitchDropReason, null, 2)}</pre> : null}
+                {message.responseBodyExcerpt ? <pre className="json-block">{message.responseBodyExcerpt}</pre> : null}
+                {message.lastError ? <p className="error">{message.lastError}</p> : null}
+                {!['sent', 'dropped'].includes(message.status) ? <button onClick={() => void retryOutgoingMessage(message.id).catch((retryError) => setError(String(retryError)))}>Retry safely</button> : null}
+              </article>
+            ))}
+            {outgoingMessages.length === 0 ? <p>No outgoing messages match the current filter.</p> : null}
+          </div>
+        </section>
+
         <section className="page-card" id="webhook-deliveries">
           <div className="section-heading">
             <div>
@@ -566,7 +623,7 @@ function App() {
           </div>
         </section>
 
-        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Diagnostics', 'Chat Log', 'Webhook Deliveries'].includes(page)).map((page) => (
+        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Diagnostics', 'Chat Log', 'Outgoing Messages', 'Webhook Deliveries'].includes(page)).map((page) => (
           <section className="page-card placeholder" id={page.toLowerCase().replaceAll(' ', '-')} key={page}>
             <h2>{page}</h2>
             <p>Operational controls for this area arrive in later phases.</p>
