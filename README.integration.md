@@ -1,67 +1,152 @@
-# erwin-gateway integration notes
+# erwin-gateway integration guide
 
-Phase 2 exposes the app registry, app API key rotation, and the first authenticated app endpoint required before downstream apps call the gateway.
+This guide is enough for a new internal app to authenticate with `erwin-gateway`, call app APIs, send chat, and receive signed webhooks.
 
-## App authentication
+## 1. Register an app
 
-App-facing APIs use the contract header:
-
-```text
-Authorization: Bearer <app_api_key>
-```
-
-App API keys are generated from the admin API/UI, shown once, and never stored raw. The database stores only the key prefix and a keyed SHA-256 hash. A revoked key no longer authenticates.
-
-## Current endpoints
-
-- `GET /api/v1/health/live` returns a process liveness response.
-- `GET /api/v1/health/ready` checks database reachability when configured.
-- `GET /api/v1/me` authenticates the bearer app API key and returns app identity, API key identity, and permissions.
-- `GET /api/admin/apps` lists apps, permissions, webhook placeholders, and API key metadata.
-- `POST /api/admin/apps` creates an app.
-- `GET /api/admin/apps/:id` returns one app.
-- `PATCH /api/admin/apps/:id` updates app metadata, enabled state, permissions, and default webhook placeholders.
-- `POST /api/admin/apps/:id/keys` generates an API key and returns the raw key one time.
-- `DELETE /api/admin/apps/:id/keys/:keyId` revokes a key.
-
-Admin routes accept `X-Admin-API-Key: <INTERNAL_ADMIN_API_KEY>` or `Authorization: Bearer <INTERNAL_ADMIN_API_KEY>` when `INTERNAL_ADMIN_API_KEY` is configured. If it is not configured, admin auth is intentionally open for local development only and must not be exposed publicly.
-
-## Initial app seed
-
-The Drizzle migration `drizzle/0001_phase_2_app_registry.sql` creates or updates the two initial app records:
-
-### erwin-music
-
-- `chat:messages:send`
-- `chat:messages:receive`
-- `chat:commands:receive`
-- `streams:read`
-- `logs:read_own`
-
-### erwin-hatchery
-
-- `chat:messages:send`
-- `channel_points:rewards:read`
-- `channel_points:rewards:create`
-- `channel_points:rewards:update`
-- `channel_points:rewards:delete`
-- `channel_points:redemptions:read`
-- `channel_points:redemptions:manage`
-- `channel_points:events:receive`
-- `subscriptions:read`
-- `subscriptions:backfill`
-- `bits:read`
-- `bits:backfill`
-- `streams:read`
-- `events:receive_twitch_events`
-- `logs:read_own`
-
-Run migrations with:
+Use the admin UI Apps page or the admin API:
 
 ```bash
-npm run db:migrate
+curl -X POST https://gateway.example.com/api/admin/apps \
+  -H 'X-Admin-API-Key: <admin-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Example App",
+    "slug": "example-app",
+    "permissions": ["chat:messages:send", "chat:messages:receive"],
+    "webhookUrl": "https://example.internal/erwin-gateway/webhook",
+    "webhookEventFilters": ["twitch.chat.message", "twitch.chat.command"]
+  }'
 ```
 
-Then generate per-app keys from the Apps page or with `POST /api/admin/apps/:id/keys`.
+Seeded MVP apps are `erwin-music` and `erwin-hatchery`. Keep permissions least-privilege; every app API route checks the app's permissions.
 
-Twitch transport behavior, chat send APIs, webhook delivery workers, idempotency, and Channel Point flows are implemented in later phases.
+## 2. Generate an API key
+
+```bash
+curl -X POST https://gateway.example.com/api/admin/apps/<app-id>/keys \
+  -H 'X-Admin-API-Key: <admin-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"production"}'
+```
+
+The response includes `rawKey` once. Store it in the consuming app's secret manager. The gateway stores only a key prefix and HMAC hash. Revoke old keys with:
+
+```bash
+curl -X DELETE https://gateway.example.com/api/admin/apps/<app-id>/keys/<key-id> \
+  -H 'X-Admin-API-Key: <admin-key>'
+```
+
+Revoked keys fail authentication immediately.
+
+## 3. Call `/api/v1/me`
+
+```bash
+curl https://gateway.example.com/api/v1/me \
+  -H 'Authorization: Bearer <app-api-key>'
+```
+
+A successful response returns the app identity, enabled state, permissions, and API key metadata. Use this as a startup smoke test in downstream apps.
+
+## 4. Send a Twitch chat message
+
+```bash
+curl -X POST https://gateway.example.com/api/v1/chat/messages \
+  -H 'Authorization: Bearer <app-api-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "message": "Thanks for voting!",
+    "idempotency_key": "vote-round-2026-05-18T00:00:00Z",
+    "for_source_only": true,
+    "priority": 0
+  }'
+```
+
+Requirements:
+
+- Permission: `chat:messages:send`.
+- `idempotency_key` is required for every outgoing chat write.
+- Reusing the same key with the same body returns the existing queued/sent message.
+- Reusing the same key with different message parameters returns `409` and does not enqueue a duplicate.
+
+Check status with:
+
+```bash
+curl https://gateway.example.com/api/v1/chat/messages/<message-id> \
+  -H 'Authorization: Bearer <app-api-key>'
+```
+
+## 5. Receive and verify webhooks
+
+Webhook deliveries are JSON `POST` requests to the app webhook URL. Headers:
+
+```text
+X-Erwin-Gateway-Delivery-Id: <delivery uuid>
+X-Erwin-Gateway-Event-Id: <event uuid>
+X-Erwin-Gateway-Timestamp: <ISO timestamp>
+X-Erwin-Gateway-Signature: sha256=<hex hmac>
+X-Erwin-Gateway-App-Id: <app uuid>
+```
+
+Signature input is:
+
+```text
+delivery_id + timestamp + raw_body
+```
+
+Node verification example:
+
+```js
+import crypto from 'node:crypto';
+
+export function verifyGatewayWebhook({ secret, deliveryId, timestamp, rawBody, signature }) {
+  const expected = `sha256=${crypto
+    .createHmac('sha256', secret)
+    .update(deliveryId)
+    .update(timestamp)
+    .update(rawBody)
+    .digest('hex')}`;
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+}
+```
+
+Important receiver rules:
+
+- Verify against the exact raw request body, not parsed/re-serialized JSON.
+- Reject old timestamps to limit replay risk.
+- Store `X-Erwin-Gateway-Delivery-Id` or payload `event_id` to make your handler idempotent.
+- Return any `2xx` response only after the app has durably recorded the event or safely detected a duplicate.
+
+Common event types:
+
+- `twitch.chat.message`
+- `twitch.chat.command`
+- `twitch.channel_points.redemption.add`
+- `twitch.channel_points.redemption.update`
+- `twitch.channel.subscribe`
+- `twitch.channel.subscription.gift`
+- `twitch.channel.cheer`
+- `twitch.stream.online`
+- `twitch.stream.offline`
+
+## Idempotency expectations
+
+- Gateway write endpoints require idempotency keys where duplicate external effects are possible.
+- Chat sends dedupe by `(app, scope, idempotency_key)` and reject same-key/different-body conflicts.
+- EventSub messages dedupe by Twitch message ID.
+- Channel Point redemptions dedupe by Twitch redemption ID.
+- Downstream webhook receivers must also dedupe because HTTP retries can deliver the same event more than once.
+
+## Retry and dead-letter behavior
+
+- Webhook deliveries retry on network errors and non-2xx responses.
+- Retry attempts use bounded exponential backoff and are recorded in delivery attempts.
+- After the retry limit, the delivery is marked `dead_lettered` and appears in admin diagnostics.
+- Operators can inspect and force retry delivery from the admin UI/API after fixing the downstream app.
+- Outgoing chat messages also retry safe Twitch failures and dead-letter permanently failed sends with status, response excerpts, and diagnostic context that excludes secrets.
+
+## Health checks for consumers
+
+- `GET /api/v1/health/live` confirms the process is running.
+- `GET /api/v1/health/ready` confirms database/Twitch readiness.
+- `GET /api/v1/health/deep` includes scope, EventSub, queue, Channel Point, Bits/subscription, and dead-letter diagnostics.

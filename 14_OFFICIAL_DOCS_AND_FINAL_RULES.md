@@ -68,7 +68,7 @@ erwin-gateway
 Do not use:
 
 ```text
-erwin-twitch-gateway
+the Twitch-specific gateway name
 ```
 
 Use Twitch-specific names only for modules, routes, docs, and code that are actually Twitch-specific.

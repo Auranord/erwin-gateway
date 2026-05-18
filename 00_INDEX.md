@@ -4,7 +4,7 @@
 
 `erwin-gateway` is the central integration gateway for NTKOH apps.
 
-The first implementation module is Twitch. The name is intentionally broader than `erwin-twitch-gateway` so future modules such as Discord, YouTube, overlays, or shared notification routing can be added later without renaming the service.
+The first implementation module is Twitch. The name is intentionally broader than a Twitch-specific gateway name so future modules such as Discord, YouTube, overlays, or shared notification routing can be added later without renaming the service.
 
 ## Downstream apps covered by MVP
 
@@ -47,7 +47,7 @@ erwin-gateway
 Do not use:
 
 ```text
-erwin-twitch-gateway
+the Twitch-specific gateway name
 ```
 
 Twitch-specific code should live under clearly named modules/packages such as:
