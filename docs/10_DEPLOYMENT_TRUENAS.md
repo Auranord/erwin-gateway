@@ -42,51 +42,26 @@ LOG_HEALTHCHECK_REQUESTS=false
 ## Compose example shape
 
 ```yaml
-name: erwin-gateway-dev
-
-networks:
-  erwin_internal_test:
-    name: erwin_internal_test
-
 services:
-  migrate:
-    image: ghcr.io/auranord/erwin-gateway:dev
-    container_name: erwin-gateway-migrate-dev
-    pull_policy: always
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      TZ: Europe/Berlin
-      DATABASE_URL: postgres://erwin_gateway:CHANGE_ME@postgres:5432/erwin_gateway
-    command: ["npm", "run", "db:migrate"]
-    networks:
-      - erwin_internal_test
-
-  api:
-    image: ghcr.io/auranord/erwin-gateway:dev
-    container_name: erwin-gateway-api-dev
+  erwin-gateway:
+    image: ghcr.io/auranord/erwin-gateway:main
+    container_name: erwin-gateway
     restart: unless-stopped
     pull_policy: always
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    ports:
+      - "3100:3000"
     environment:
       NODE_ENV: production
       TZ: Europe/Berlin
       HOST: 0.0.0.0
       PORT: 3000
       DATABASE_URL: postgres://erwin_gateway:CHANGE_ME@postgres:5432/erwin_gateway
-      PUBLIC_APP_URL: https://gateway.example.com
-      PUBLIC_API_URL: https://gateway.example.com
-      TWITCH_EVENTSUB_CALLBACK_URL: https://gateway.example.com/webhooks/twitch/eventsub
-      CORS_ORIGIN: https://gateway.example.com
+      PUBLIC_APP_URL: https://erwin-gateway.example.com
+      PUBLIC_API_URL: https://erwin-gateway.example.com
+      TWITCH_EVENTSUB_CALLBACK_URL: https://erwin-gateway.example.com/webhooks/twitch/eventsub
+      CORS_ORIGIN: https://erwin-gateway.example.com
       SESSION_SECRET: CHANGE_ME
-      TOKEN_ENCRYPTION_KEY: CHANGE_ME_32_BYTES_MIN
+      TOKEN_ENCRYPTION_KEY: CHANGE_ME
       API_KEY_PEPPER: CHANGE_ME
       INTERNAL_ADMIN_API_KEY: CHANGE_ME
       TWITCH_CLIENT_ID: CHANGE_ME
@@ -94,36 +69,32 @@ services:
       TWITCH_EVENTSUB_SECRET: CHANGE_ME
       TWITCH_BOT_LOGIN: CHANGE_ME
       TWITCH_BOT_USER_ID: CHANGE_ME
-      TWITCH_BROADCASTER_ID: "53471337"
-      TWITCH_CHANNEL_LOGIN: ntkoh
+      TWITCH_BROADCASTER_ID: CHANGE_ME
+      TWITCH_CHANNEL_LOGIN: CHANGE_ME
       LOG_HEALTHCHECK_REQUESTS: "false"
-    networks:
-      - erwin_internal_test
-    ports:
-      - "3030:3000"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/health/ready"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    volumes:
-      - /mnt/fast/config/erwin-gateway-dev/logs:/app/logs
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
     command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
+    volumes:
+      - /mnt/fast/config/erwin-gateway/logs:/app/logs
 
   postgres:
     image: postgres:16-alpine
-    container_name: erwin-gateway-postgres-dev
+    container_name: erwin-gateway-postgres
     restart: unless-stopped
-    pull_policy: always
     environment:
       POSTGRES_DB: erwin_gateway
       POSTGRES_USER: erwin_gateway
       POSTGRES_PASSWORD: CHANGE_ME
-    networks:
-      - erwin_internal_test
     volumes:
-      - /mnt/fast/config/erwin-gateway-dev/postgres:/var/lib/postgresql/data
+      - /mnt/fast/config/erwin-gateway/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U erwin_gateway -d erwin_gateway"]
       interval: 10s
@@ -167,8 +138,8 @@ Internal app APIs can remain private or protected, but the Twitch callback must 
 Recommended persistent paths:
 
 ```text
-/mnt/fast/config/erwin-gateway-dev/postgres
-/mnt/fast/config/erwin-gateway-dev/logs
+/mnt/fast/config/erwin-gateway/postgres
+/mnt/fast/config/erwin-gateway/logs
 ```
 
 Adjust paths as needed for the final TrueNAS setup.
