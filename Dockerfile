@@ -5,7 +5,8 @@ RUN npm install -g npm@11.14.1
 
 FROM base AS deps
 COPY . .
-RUN npm ci --no-audit --no-fund
+RUN node scripts/diagnose-package-metadata.mjs
+RUN npm --version && node --version && npm ci --no-audit --no-fund --loglevel=silly || (status=$?; echo "===== NPM DEBUG LOGS ====="; find /root/.npm/_logs -type f -name "*debug*log" -maxdepth 1 -print -exec cat {} \;; exit $status)
 
 FROM deps AS build
 ARG BUILD_SHA=unknown
