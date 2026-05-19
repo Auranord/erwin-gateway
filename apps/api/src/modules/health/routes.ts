@@ -8,11 +8,13 @@ import { getEventSubDiagnostics } from '../twitch-eventsub/service.js';
 import { getOutgoingChatHealth } from '../twitch-chat/service.js';
 import { channelPointDiagnostics } from '../channel-points/service.js';
 import { twitchDataDiagnostics } from '../twitch-data.js';
+import type { StartupReadiness } from '../../app.js';
 
 interface HealthRouteOptions {
   config: AppConfig;
   pool?: Pool;
   db?: Database;
+  startupReadiness?: StartupReadiness;
 }
 
 function baseHealth(config: AppConfig, status: HealthResponse['status']): HealthResponse & {
@@ -47,15 +49,16 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         return reply.code(503).send({ ...baseHealth(options.config, 'degraded'), checks: { database } });
       }
 
-      const twitch = options.db ? await getTwitchSetupStatus(options.db, options.config) : null;
-      const ready = twitch?.status !== 'degraded';
+      const schemaReady = options.startupReadiness?.migrationsStatus === 'ready';
+      const twitch = options.db && schemaReady ? await getTwitchSetupStatus(options.db, options.config) : null;
+      const ready = schemaReady && twitch?.status !== 'degraded';
       return reply.code(ready ? 200 : 503).send({
         ...baseHealth(options.config, ready ? 'ready' : 'degraded'),
         checks: {
           database,
-          migrations: 'phase_9_twitch_data_expected',
-          workers: 'twitch_token_worker_registered',
-          twitchAuth: twitch?.status ?? 'not_configured'
+          migrations: options.startupReadiness?.migrationsStatus ?? 'unknown',
+          workers: options.startupReadiness?.workersStarted ? 'started' : `not_started:${options.startupReadiness?.workerStartReason ?? 'unknown'}`,
+          twitchAuth: schemaReady ? twitch?.status ?? 'not_configured' : 'not_checked_schema_missing'
         }
       });
     } catch (error) {
@@ -67,8 +70,11 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
   app.get('/api/v1/health/deep', async (request, reply) => {
     const checks: Record<string, unknown> = {
       database: 'not_configured',
-      migrations: 'phase_9_twitch_data_expected',
-      workers: { twitchTokenRefresh: Boolean(options.db), outgoingChat: Boolean(options.db) },
+      migrations: options.startupReadiness?.migrationsStatus ?? 'unknown',
+      workers: {
+        started: options.startupReadiness?.workersStarted ?? false,
+        reason: options.startupReadiness?.workerStartReason ?? 'unknown'
+      },
       eventSub: 'not_checked',
       queues: 'not_checked'
     };
@@ -82,7 +88,11 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
       status = 'degraded';
     }
 
-    if (options.db) {
+    if (checks.database !== 'reachable' || checks.migrations !== 'ready' || !options.startupReadiness?.workersStarted) {
+      status = 'degraded';
+    }
+
+    if (options.db && options.startupReadiness?.migrationsStatus === 'ready') {
       try {
         const twitch = await getTwitchSetupStatus(options.db, options.config);
         checks.twitch = {
@@ -155,7 +165,9 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         status = 'degraded';
       }
     } else {
-      checks.twitch = { status: 'not_configured' };
+      checks.twitch = options.db
+        ? { status: 'not_checked', reason: 'schema_missing' }
+        : { status: 'not_configured' };
       status = 'degraded';
     }
 
