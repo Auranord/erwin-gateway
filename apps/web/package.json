@@ -19,5 +19,8 @@
   "devDependencies": {
     "@types/react": "^19.1.5",
     "@types/react-dom": "^19.1.5"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-musl": "^4.60.4"
   }
 }
