@@ -45,6 +45,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
 
   postgres:
     image: postgres:16-alpine

@@ -35,6 +35,12 @@ Run migrations before starting a new image or as a one-shot admin task:
 npm run db:migrate
 ```
 
+For TrueNAS SCALE / Compose deployments, run migrations automatically in the API container startup command:
+
+- `command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]`
+
+This ensures first boot after a fresh Postgres volume applies schema before readiness checks and worker startup, without requiring a separate migration service.
+
 The MVP migrations create app registry, hashed API keys, Twitch OAuth/token tables, EventSub tables, chat/webhook tables, outgoing chat queue, text commands, Channel Point tables, subscriptions, Bits, stream/profile/schedule cache, diagnostics, and idempotency records.
 
 ## Health endpoints
@@ -54,7 +60,7 @@ GET /api/v1/health/deep
 ## First-run setup
 
 1. Deploy Postgres and the gateway container.
-2. Run migrations.
+2. Confirm startup logs show migration success before server listen.
 3. Open the admin UI.
 4. Connect the Twitch bot account.
 5. Connect the Twitch broadcaster account.

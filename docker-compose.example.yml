@@ -47,6 +47,7 @@ services:
       start_period: 30s
     volumes:
       - /mnt/fast/config/erwin-gateway-dev/logs:/app/logs
+    command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
 
   postgres:
     image: postgres:16-alpine

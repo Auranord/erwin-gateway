@@ -91,6 +91,7 @@ services:
       start_period: 30s
     volumes:
       - /mnt/fast/config/erwin-gateway-dev/logs:/app/logs
+    command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
 
   postgres:
     image: postgres:16-alpine
@@ -113,6 +114,14 @@ services:
 ```
 
 Adminer is optional and should not be included by default because this service stores sensitive Twitch token material.
+
+## Automatic migrations on deploy
+
+TrueNAS SCALE Compose should run migrations automatically in the API startup command:
+
+`command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]`
+
+If `db:migrate` fails, the API process does not start; fix the migration error and redeploy.
 
 ## Image tags
 
