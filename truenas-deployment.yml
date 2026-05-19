@@ -9,20 +9,31 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
+      TZ: UTC
+      HOST: 0.0.0.0
       PORT: 3000
 
       DATABASE_URL: postgres://erwin:change-me@postgres:5432/erwin_gateway
-      ENCRYPTION_KEY_BASE64: change-me-32-byte-key-base64
-      TWITCH_EVENTSUB_SECRET: change-me-long-random-secret
-      INTERNAL_ADMIN_API_KEY: change-me-admin-api-key
+      PUBLIC_APP_URL: https://gateway.example.com
+      PUBLIC_API_URL: https://gateway.example.com
+      TWITCH_EVENTSUB_CALLBACK_URL: https://gateway.example.com/webhooks/twitch/eventsub
+      CORS_ORIGIN: https://gateway.example.com
 
-      TWITCH_BOT_CLIENT_ID: your-bot-client-id
-      TWITCH_BOT_CLIENT_SECRET: your-bot-client-secret
-      TWITCH_BROADCASTER_CLIENT_ID: your-broadcaster-client-id
-      TWITCH_BROADCASTER_CLIENT_SECRET: your-broadcaster-client-secret
-      TWITCH_REDIRECT_URI_BOT: https://gateway.example.com/api/v1/twitch/oauth/bot/callback
-      TWITCH_REDIRECT_URI_BROADCASTER: https://gateway.example.com/api/v1/twitch/oauth/broadcaster/callback
-      TWITCH_EVENTSUB_CALLBACK_BASE_URL: https://gateway.example.com
+      SESSION_SECRET: change-me-session-secret-min-32
+      TOKEN_ENCRYPTION_KEY: change-me-token-encryption-key-min-32
+      API_KEY_PEPPER: change-me-api-key-pepper-min-16
+      INTERNAL_ADMIN_API_KEY: change-me-admin-api-key-min-16
+
+      TWITCH_CLIENT_ID: your-twitch-client-id
+      TWITCH_CLIENT_SECRET: your-twitch-client-secret
+      TWITCH_EVENTSUB_SECRET: change-me-long-random-secret
+
+      TWITCH_BOT_LOGIN: your-bot-login
+      TWITCH_BOT_USER_ID: your-bot-user-id
+      TWITCH_BROADCASTER_ID: your-broadcaster-user-id
+      TWITCH_CHANNEL_LOGIN: your-channel-login
+
+      LOG_HEALTHCHECK_REQUESTS: "false"
 
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
