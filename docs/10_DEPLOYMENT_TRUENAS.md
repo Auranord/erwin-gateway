@@ -49,6 +49,22 @@ networks:
     name: erwin_internal_test
 
 services:
+  migrate:
+    image: ghcr.io/auranord/erwin-gateway:dev
+    container_name: erwin-gateway-migrate-dev
+    pull_policy: always
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: Europe/Berlin
+      DATABASE_URL: postgres://erwin_gateway:CHANGE_ME@postgres:5432/erwin_gateway
+    command: ["npm", "run", "db:migrate"]
+    networks:
+      - erwin_internal_test
+
   api:
     image: ghcr.io/auranord/erwin-gateway:dev
     container_name: erwin-gateway-api-dev
@@ -57,6 +73,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       TZ: Europe/Berlin
