@@ -1,0 +1,15 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    { "idx": 0, "version": "7", "when": 1700000000000, "tag": "0000_phase_1_foundation", "breakpoints": true },
+    { "idx": 1, "version": "7", "when": 1700000001000, "tag": "0001_phase_2_app_registry", "breakpoints": true },
+    { "idx": 2, "version": "7", "when": 1700000002000, "tag": "0002_phase_3_twitch_auth", "breakpoints": true },
+    { "idx": 3, "version": "7", "when": 1700000003000, "tag": "0003_phase_4_eventsub", "breakpoints": true },
+    { "idx": 4, "version": "7", "when": 1700000004000, "tag": "0004_phase_5_chat_webhooks", "breakpoints": true },
+    { "idx": 5, "version": "7", "when": 1700000005000, "tag": "0005_phase_6_outgoing_chat", "breakpoints": true },
+    { "idx": 6, "version": "7", "when": 1700000006000, "tag": "0006_phase_7_text_commands", "breakpoints": true },
+    { "idx": 7, "version": "7", "when": 1700000007000, "tag": "0007_phase_8_channel_points", "breakpoints": true },
+    { "idx": 8, "version": "7", "when": 1700000008000, "tag": "0008_phase_9_twitch_data", "breakpoints": true }
+  ]
+}
