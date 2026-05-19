@@ -7,8 +7,7 @@ COPY package*.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
-RUN npm ci --include=dev --include=optional \
-    && npm install --no-save --no-package-lock @rollup/rollup-linux-x64-musl@4.60.4
+RUN npm ci --include=dev --include=optional --no-audit --no-fund
 
 FROM deps AS build
 COPY . .
