@@ -49,15 +49,16 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         return reply.code(503).send({ ...baseHealth(options.config, 'degraded'), checks: { database } });
       }
 
-      const twitch = options.db ? await getTwitchSetupStatus(options.db, options.config) : null;
-      const ready = twitch?.status !== 'degraded';
+      const schemaReady = options.startupReadiness?.migrationsStatus === 'ready';
+      const twitch = options.db && schemaReady ? await getTwitchSetupStatus(options.db, options.config) : null;
+      const ready = schemaReady && twitch?.status !== 'degraded';
       return reply.code(ready ? 200 : 503).send({
         ...baseHealth(options.config, ready ? 'ready' : 'degraded'),
         checks: {
           database,
           migrations: options.startupReadiness?.migrationsStatus ?? 'unknown',
           workers: options.startupReadiness?.workersStarted ? 'started' : `not_started:${options.startupReadiness?.workerStartReason ?? 'unknown'}`,
-          twitchAuth: twitch?.status ?? 'not_configured'
+          twitchAuth: schemaReady ? twitch?.status ?? 'not_configured' : 'not_checked_schema_missing'
         }
       });
     } catch (error) {
@@ -91,7 +92,7 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
       status = 'degraded';
     }
 
-    if (options.db) {
+    if (options.db && options.startupReadiness?.migrationsStatus === 'ready') {
       try {
         const twitch = await getTwitchSetupStatus(options.db, options.config);
         checks.twitch = {
@@ -164,7 +165,9 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         status = 'degraded';
       }
     } else {
-      checks.twitch = { status: 'not_configured' };
+      checks.twitch = options.db
+        ? { status: 'not_checked', reason: 'schema_missing' }
+        : { status: 'not_configured' };
       status = 'degraded';
     }
 
