@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  erwin-gateway:
+    image: ghcr.io/your-org/erwin-gateway:latest
+    container_name: erwin-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+
+      DATABASE_URL: postgres://erwin:change-me@postgres:5432/erwin_gateway
+      ENCRYPTION_KEY_BASE64: change-me-32-byte-key-base64
+      TWITCH_EVENTSUB_SECRET: change-me-long-random-secret
+      INTERNAL_ADMIN_API_KEY: change-me-admin-api-key
+
+      TWITCH_BOT_CLIENT_ID: your-bot-client-id
+      TWITCH_BOT_CLIENT_SECRET: your-bot-client-secret
+      TWITCH_BROADCASTER_CLIENT_ID: your-broadcaster-client-id
+      TWITCH_BROADCASTER_CLIENT_SECRET: your-broadcaster-client-secret
+      TWITCH_REDIRECT_URI_BOT: https://gateway.example.com/api/v1/twitch/oauth/bot/callback
+      TWITCH_REDIRECT_URI_BROADCASTER: https://gateway.example.com/api/v1/twitch/oauth/broadcaster/callback
+      TWITCH_EVENTSUB_CALLBACK_BASE_URL: https://gateway.example.com
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: erwin-gateway-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: erwin_gateway
+      POSTGRES_USER: erwin
+      POSTGRES_PASSWORD: change-me
+    volumes:
+      - erwin_gateway_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erwin -d erwin_gateway"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  erwin_gateway_postgres:

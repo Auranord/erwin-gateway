@@ -53,11 +53,12 @@ docker build -t erwin-gateway:local .
 
 ## Deployment and migration docs
 
-- `README.deployment.md` — TrueNAS/container deployment, migrations, health checks, and operations.
-- `README.integration.md` — registering apps, creating API keys, calling app APIs, webhook verification, idempotency, and retry/dead-letter behavior.
-- `README.twitch-auth.md` — Twitch app setup, bot/broadcaster OAuth, exact scopes by feature, and EventSub callback requirements.
-- `README.migration-erwin-music.md` — replacing IRC receive/send, music command intake, simple commands, and stream polling.
-- `README.migration-erwin-hatchery.md` — replacing rewards, redemptions, subscriptions, Bits, stream/profile/schedule calls.
+- `docs/README.deployment.md` — TrueNAS/container deployment, migrations, health checks, and operations.
+- `docs/README.integration.md` — registering apps, creating API keys, calling app APIs, webhook verification, idempotency, and retry/dead-letter behavior.
+- `docs/README.twitch-auth.md` — Twitch app setup, bot/broadcaster OAuth, exact scopes by feature, and EventSub callback requirements.
+- `docs/README.migration-erwin-music.md` — replacing IRC receive/send, music command intake, simple commands, and stream polling.
+- `docs/README.migration-erwin-hatchery.md` — replacing rewards, redemptions, subscriptions, Bits, stream/profile/schedule calls.
+- `docs/truenas-scale-compose.example.yaml` — production-style TrueNAS SCALE Docker Compose example (no `dev` image tag).
 
 ## Naming
 
