@@ -1,16 +1,18 @@
 # syntax=docker/dockerfile:1
 FROM node:22-alpine AS base
 WORKDIR /app
+RUN npm install -g npm@11.14.1
 
 FROM base AS deps
-COPY package*.json tsconfig.base.json ./
-COPY apps/api/package.json apps/api/package.json
-COPY apps/web/package.json apps/web/package.json
-COPY packages/shared/package.json packages/shared/package.json
-RUN npm ci --no-audit --no-fund
+COPY . .
+RUN node scripts/diagnose-package-metadata.mjs
+RUN npm --version && node --version && npm ci --no-audit --no-fund --loglevel=silly || (status=$?; echo "===== NPM DEBUG LOGS ====="; find /root/.npm/_logs -type f -name "*debug*log" -maxdepth 1 -print -exec cat {} \;; exit $status)
 
 FROM deps AS build
-COPY . .
+ARG BUILD_SHA=unknown
+ARG BUILD_BRANCH=unknown
+ENV BUILD_SHA=$BUILD_SHA
+ENV BUILD_BRANCH=$BUILD_BRANCH
 RUN npm run build
 
 FROM node:22-alpine AS runtime
