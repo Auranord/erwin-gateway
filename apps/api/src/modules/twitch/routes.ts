@@ -70,6 +70,10 @@ export async function registerTwitchAdminRoutes(app: FastifyInstance, options: T
   app.post('/api/admin/twitch/broadcaster/login/start', async (request, reply) => start('broadcaster', request.body, reply));
   app.get('/api/admin/twitch/broadcaster/callback', async (request, reply) => callback('broadcaster', request.query, reply));
 
+  // Public callback aliases for OAuth providers that redirect without admin auth headers.
+  app.get('/api/v1/twitch/oauth/bot/callback', async (request, reply) => callback('bot', request.query, reply));
+  app.get('/api/v1/twitch/oauth/broadcaster/callback', async (request, reply) => callback('broadcaster', request.query, reply));
+
   app.get('/api/admin/twitch/setup/status', async (_request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;
     return getTwitchSetupStatus(options.db, options.config);
