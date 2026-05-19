@@ -8,11 +8,13 @@ import { getEventSubDiagnostics } from '../twitch-eventsub/service.js';
 import { getOutgoingChatHealth } from '../twitch-chat/service.js';
 import { channelPointDiagnostics } from '../channel-points/service.js';
 import { twitchDataDiagnostics } from '../twitch-data.js';
+import type { StartupReadiness } from '../../app.js';
 
 interface HealthRouteOptions {
   config: AppConfig;
   pool?: Pool;
   db?: Database;
+  startupReadiness?: StartupReadiness;
 }
 
 function baseHealth(config: AppConfig, status: HealthResponse['status']): HealthResponse & {
@@ -53,8 +55,8 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         ...baseHealth(options.config, ready ? 'ready' : 'degraded'),
         checks: {
           database,
-          migrations: 'phase_9_twitch_data_expected',
-          workers: 'twitch_token_worker_registered',
+          migrations: options.startupReadiness?.migrationsStatus ?? 'unknown',
+          workers: options.startupReadiness?.workersStarted ? 'started' : `not_started:${options.startupReadiness?.workerStartReason ?? 'unknown'}`,
           twitchAuth: twitch?.status ?? 'not_configured'
         }
       });
@@ -67,8 +69,11 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
   app.get('/api/v1/health/deep', async (request, reply) => {
     const checks: Record<string, unknown> = {
       database: 'not_configured',
-      migrations: 'phase_9_twitch_data_expected',
-      workers: { twitchTokenRefresh: Boolean(options.db), outgoingChat: Boolean(options.db) },
+      migrations: options.startupReadiness?.migrationsStatus ?? 'unknown',
+      workers: {
+        started: options.startupReadiness?.workersStarted ?? false,
+        reason: options.startupReadiness?.workerStartReason ?? 'unknown'
+      },
       eventSub: 'not_checked',
       queues: 'not_checked'
     };
@@ -79,6 +84,10 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
     } catch (error) {
       request.log.warn({ error }, 'deep health database check failed');
       checks.database = 'unreachable';
+      status = 'degraded';
+    }
+
+    if (checks.database !== 'reachable' || checks.migrations !== 'ready' || !options.startupReadiness?.workersStarted) {
       status = 'degraded';
     }
 
