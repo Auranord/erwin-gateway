@@ -36,7 +36,7 @@ let appTokenCache: { accessToken: string; expiresAt: Date } | null = null;
 export function getRedirectUri(config: AppConfig, role: TwitchAccountRole) {
   const base = config.PUBLIC_API_URL ?? config.PUBLIC_APP_URL;
   if (!base) throw new Error('PUBLIC_API_URL or PUBLIC_APP_URL is required for Twitch OAuth redirects');
-  return new URL(`/api/admin/twitch/${role}/callback`, base).toString();
+  return new URL(`/api/v1/twitch/oauth/${role}/callback`, base).toString();
 }
 
 function requireClientConfig(config: AppConfig) {
