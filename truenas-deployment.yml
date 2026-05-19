@@ -58,8 +58,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      erwin-gateway-migrate:
-        condition: service_completed_successfully
+    command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
 
   postgres:
     image: postgres:16-alpine

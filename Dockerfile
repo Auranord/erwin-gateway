@@ -27,6 +27,8 @@ COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/packages/shared/package.json ./packages/shared/package.json
 COPY --from=build /app/packages/shared/dist ./packages/shared/dist
+COPY --from=build /app/drizzle.config.ts ./drizzle.config.ts
+COPY --from=build /app/drizzle ./drizzle
 USER erwin
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD wget -qO- http://127.0.0.1:3000/api/v1/health/live || exit 1

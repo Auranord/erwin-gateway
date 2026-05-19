@@ -109,6 +109,7 @@ services:
       start_period: 30s
     volumes:
       - /mnt/fast/config/erwin-gateway-dev/logs:/app/logs
+    command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
 
   postgres:
     image: postgres:16-alpine
@@ -134,9 +135,11 @@ Adminer is optional and should not be included by default because this service s
 
 ## Automatic migrations on deploy
 
-TrueNAS SCALE Compose should run migrations automatically via the one-shot `migrate` service above. The `api` service must wait for `migrate` to complete successfully before starting.
+TrueNAS SCALE Compose should run migrations automatically in the API startup command:
 
-If `migrate` fails, `api` should stay stopped; fix the migration error and redeploy.
+`command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]`
+
+If `db:migrate` fails, the API process does not start; fix the migration error and redeploy.
 
 ## Image tags
 
