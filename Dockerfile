@@ -5,7 +5,7 @@ RUN npm install -g npm@11.14.1
 
 FROM base AS deps
 COPY . .
-RUN npm ci --no-audit --no-fund
+RUN npm ci --workspaces --include-workspace-root --include=optional --no-audit --no-fund
 
 FROM deps AS build
 ARG BUILD_SHA=unknown
