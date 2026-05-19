@@ -159,3 +159,23 @@ test('OpenAPI includes final health acceptance endpoints', () => {
   assert.ok(paths['/api/v1/health/ready']);
   assert.ok(paths['/api/v1/health/deep']);
 });
+
+test('EventSub ingress route covers rawBody diagnostics, challenge retry behavior, and safe error logging', () => {
+  const source = readSource('modules/twitch-eventsub/routes.ts');
+  assert.match(source, /EventSub ingress missing required metadata/);
+  for (const field of ['missingMessageId', 'missingTimestamp', 'missingSignature', 'missingMessageType', 'missingRawBody', 'contentType', 'hasParsedBody', 'parsedBodyType', 'contentLength']) {
+    assert.match(source, new RegExp(field), `missing field ${field} in diagnostic log`);
+  }
+  assert.match(source, /if \(messageType === 'webhook_callback_verification'\)/);
+  assert.match(source, /reply\.header\('Content-Type', 'text\/plain'\)\.code\(200\)\.send\(payload\.challenge\)/);
+  assert.match(source, /persistEventSubMessage\(options\.db, \{ messageId, messageType, headers: selectedHeaders\(request\.headers\), payload \}\)/);
+  assert.match(source, /EventSub ingress persistence failed after challenge response/);
+  assert.match(source, /EventSub ingress unexpected error/);
+  assert.match(source, /EventSub ingress signature invalid/);
+});
+
+test('Fastify JSON parser captures raw body bytes for EventSub signature verification with charset variants', () => {
+  const source = readSource('app.ts');
+  assert.match(source, /addContentTypeParser\(\/\^application\\\/json\(\?:\\s\*;\.\*\)\?\$\/i, \{ parseAs: 'buffer' \}/);
+  assert.match(source, /\(request\.raw as any\)\.rawBody = body/);
+});
