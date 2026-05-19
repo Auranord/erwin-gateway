@@ -44,6 +44,15 @@ Use:
 - `GET /api/v1/health/ready`
 - `GET /api/v1/health/deep`
 
+## Admin UI serving
+
+- The production API container also serves the built admin UI bundle.
+- Browser entry points are:
+  - `GET /`
+  - `GET /admin`
+  - `GET /admin/*` (SPA fallback to `index.html`)
+- API and webhook routes continue to return JSON responses (`/api/*`, `/webhooks/*`) and are not SPA-fallback routes.
+
 ## First-run setup
 
 1. Deploy using `truenas-deployment.yml`.
