@@ -120,18 +120,25 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
         checks.eventSub = {
           status: eventSub.healthy ? 'healthy' : 'degraded',
           callbackUrl: eventSub.callbackUrl,
-          lastDelivery: eventSub.lastDelivery,
+          lastRawEventSubReceivedAt: eventSub.lastDelivery?.receivedAt ?? null,
+          lastChannelChatMessageReceivedAt: eventSub.lastChannelChatMessageDelivery?.receivedAt ?? null,
           subscriptionCount: eventSub.subscriptions.length,
           missingSubscriptions: eventSub.missingSubscriptions,
           missingRequiredSubscriptions: eventSub.missingSubscriptions.filter((sub) => requiredEventSubTypes.includes(sub.type)),
           missingOptionalSubscriptions: eventSub.missingSubscriptions.filter((sub) => optionalEventSubTypes.includes(sub.type)),
           chatMessageSubscriptionHealthy: !eventSub.missingSubscriptions.some((sub) => sub.type === 'channel.chat.message'),
+          desiredChecks: eventSub.desiredVsLive,
+          localSubscriptionExists: eventSub.desiredVsLive.every((sub) => sub.localStatus !== null),
+          liveSubscriptionExists: eventSub.desiredVsLive.every((sub) => sub.liveFound),
+          liveSubscriptionEnabled: eventSub.desiredVsLive.every((sub) => sub.liveStatus === 'enabled' || sub.liveStatus === 'webhook_callback_verification_pending'),
+          callbackMatchesConfigured: eventSub.desiredVsLive.every((sub) => sub.callbackMatches),
           revokedSubscriptions: eventSub.revokedSubscriptions,
           duplicateCount: eventSub.duplicateCount,
-          desiredError: eventSub.desiredError
+          desiredError: eventSub.desiredError,
+          liveError: eventSub.liveError
         };
         const missingRequired = eventSub.missingSubscriptions.some((sub) => requiredEventSubTypes.includes(sub.type));
-        if (eventSub.desiredError || missingRequired || eventSub.revokedSubscriptions.length > 0) status = 'degraded';
+        if (eventSub.desiredError || eventSub.liveError || missingRequired || eventSub.revokedSubscriptions.length > 0 || !eventSub.desiredVsLive.every((sub) => sub.liveFound && sub.callbackMatches && (sub.liveStatus === 'enabled' || sub.liveStatus === 'webhook_callback_verification_pending'))) status = 'degraded';
 
         const outgoingChat = await getOutgoingChatHealth(options.db);
         checks.queues = {

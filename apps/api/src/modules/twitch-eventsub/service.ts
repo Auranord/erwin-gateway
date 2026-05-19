@@ -48,6 +48,16 @@ export async function listTwitchEventSubSubscriptions(config: AppConfig): Promis
   return rows;
 }
 
+function callbackParts(callback?: string) {
+  if (!callback) return { hostname: null, path: null };
+  try {
+    const url = new URL(callback);
+    return { hostname: url.hostname, path: url.pathname };
+  } catch {
+    return { hostname: null, path: null };
+  }
+}
+
 async function createSubscription(config: AppConfig, callback: string, desired: DesiredEventSubSubscription) {
   const payload = await twitchRequest(config, '/eventsub/subscriptions', {
     method: 'POST',
@@ -112,7 +122,7 @@ export async function reconcileEventSubSubscriptions(db: Database, config: AppCo
     const unhealthy = !['enabled', 'webhook_callback_verification_pending'].includes(remoteSub.status);
     if (desiredSub && (callbackMismatch || unhealthy)) {
       await deleteSubscription(config, remoteSub.id);
-      actions.push({ action: 'delete_mismatched', type: remoteSub.type, id: remoteSub.id, status: remoteSub.status, callbackMismatch });
+      actions.push({ action: 'delete_mismatched', type: remoteSub.type, status: remoteSub.status, callbackMismatch, errorExcerpt: null });
       continue;
     }
     if (desiredSub) await upsertLocalSubscription(db, callback, remoteSub, desiredSub);
@@ -129,11 +139,32 @@ export async function reconcileEventSubSubscriptions(db: Database, config: AppCo
     try {
       const created = await createSubscription(config, callback, desiredSub);
       if (created) await upsertLocalSubscription(db, callback, created, desiredSub);
-      actions.push({ action: 'create_missing', type: desiredSub.type, id: created?.id ?? null });
+      actions.push({ action: 'create_missing', type: desiredSub.type, status: created?.status ?? 'created', callbackMismatch: false, errorExcerpt: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown create error';
       await db.insert(diagnosticEvents).values({ severity: 'error', module: 'twitch-eventsub', message: 'EventSub subscription create failed', details: { type: desiredSub.type, version: desiredSub.version, condition: desiredSub.condition, error: message } });
-      actions.push({ action: 'create_failed', type: desiredSub.type, error: message });
+      actions.push({ action: 'create_failed', type: desiredSub.type, status: 'error', callbackMismatch: false, errorExcerpt: message.slice(0, 180) });
+    }
+  }
+
+  const postReconcileLive = await listTwitchEventSubSubscriptions(config);
+  const liveKeys = new Set(postReconcileLive.filter((sub) => sub.transport.method === 'webhook').map((sub) => desiredKey(sub)));
+  const now = new Date();
+  for (const desiredSub of desired) {
+    if (!liveKeys.has(desiredKey(desiredSub))) {
+      await db.update(twitchEventsubSubscriptions).set({
+        status: 'missing_live',
+        twitchSubscriptionId: null,
+        revokedAt: now,
+        revokeReason: 'missing_from_twitch_live',
+        lastSyncedAt: now,
+        updatedAt: now
+      }).where(and(
+        eq(twitchEventsubSubscriptions.type, desiredSub.type),
+        eq(twitchEventsubSubscriptions.version, desiredSub.version),
+        eq(twitchEventsubSubscriptions.condition, sortCondition(desiredSub.condition))
+      ));
+      actions.push({ action: 'mark_missing_live', type: desiredSub.type, status: 'missing_live', callbackMismatch: false, errorExcerpt: null });
     }
   }
 
@@ -193,22 +224,64 @@ export async function recordRevocation(db: Database, payload: any) {
 
 export async function getEventSubDiagnostics(db: Database, config: AppConfig) {
   const [lastDelivery] = await db.select().from(twitchEventsubMessages).orderBy(desc(twitchEventsubMessages.receivedAt)).limit(1);
+  const [lastChatDelivery] = await db.select().from(twitchEventsubMessages).where(eq(twitchEventsubMessages.subscriptionType, 'channel.chat.message')).orderBy(desc(twitchEventsubMessages.receivedAt)).limit(1);
   const [duplicateRow] = await db.select({ value: count() }).from(diagnosticEvents).where(eq(diagnosticEvents.message, 'Duplicate EventSub message ignored'));
   const rows = await db.select().from(twitchEventsubSubscriptions).orderBy(twitchEventsubSubscriptions.type);
   let desired: DesiredEventSubSubscription[] = [];
   let desiredError: string | null = null;
   try { desired = await getDesiredEventSubSubscriptions(db, config); } catch (error) { desiredError = error instanceof Error ? error.message : 'unknown desired-state error'; }
-  const localKeys = new Set(rows.filter((row) => row.status === 'enabled' || row.status === 'webhook_callback_verification_pending').map((row) => desiredKey(row)));
-  const missing = desired.filter((item) => !localKeys.has(desiredKey(item)));
+  let live: TwitchSubscription[] = [];
+  let liveError: string | null = null;
+  try { live = await listTwitchEventSubSubscriptions(config); } catch (error) { liveError = error instanceof Error ? error.message : 'unknown live-state error'; }
+  const callbackUrl = (() => { try { return eventSubCallbackUrl(config); } catch { return null; } })();
+  const liveByKey = new Map(live.filter((sub) => sub.transport.method === 'webhook').map((sub) => [desiredKey(sub), sub]));
+  const comparisons = desired.map((item) => {
+    const local = rows.find((row) => desiredKey(row) === desiredKey(item));
+    const liveSub = liveByKey.get(desiredKey(item));
+    return {
+      desired: item,
+      liveFound: Boolean(liveSub),
+      liveStatus: liveSub?.status ?? null,
+      callbackMatches: Boolean(liveSub && callbackUrl && liveSub.transport.callback === callbackUrl),
+      conditionMatches: Boolean(liveSub && desiredKey(liveSub) === desiredKey(item)),
+      localStatus: local?.status ?? null
+    };
+  });
+  const missing = comparisons.filter((row) => !row.liveFound).map((row) => row.desired);
   const revoked = rows.filter((row) => row.revokedAt || !['enabled', 'webhook_callback_verification_pending', 'desired'].includes(row.status));
   return {
-    callbackUrl: (() => { try { return eventSubCallbackUrl(config); } catch { return null; } })(),
+    callbackUrl,
     lastDelivery: lastDelivery ? { messageId: lastDelivery.messageId, messageType: lastDelivery.messageType, eventType: lastDelivery.eventType, receivedAt: lastDelivery.receivedAt.toISOString(), duplicate: lastDelivery.duplicate } : null,
+    lastChannelChatMessageDelivery: lastChatDelivery ? { messageId: lastChatDelivery.messageId, receivedAt: lastChatDelivery.receivedAt.toISOString() } : null,
     subscriptions: rows.map((row) => ({ id: row.id, twitchSubscriptionId: row.twitchSubscriptionId, type: row.type, version: row.version, condition: row.condition, callbackUrl: row.callbackUrl, status: row.status, revokedAt: row.revokedAt?.toISOString() ?? null, revokeReason: row.revokeReason, lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null, lastError: row.lastError })),
     missingSubscriptions: missing,
+    desiredVsLive: comparisons,
     revokedSubscriptions: revoked.map((row) => ({ type: row.type, status: row.status, revokeReason: row.revokeReason, twitchSubscriptionId: row.twitchSubscriptionId })),
     duplicateCount: Number(duplicateRow?.value ?? 0),
     desiredError,
-    healthy: !desiredError && missing.length === 0 && revoked.length === 0
+    liveError,
+    healthy: !desiredError && !liveError && missing.length === 0 && revoked.length === 0
+  };
+}
+
+export async function getLiveEventSubDiagnostics(config: AppConfig) {
+  const callback = eventSubCallbackUrl(config);
+  const live = await listTwitchEventSubSubscriptions(config);
+  return {
+    callback,
+    subscriptions: live.map((sub) => {
+      const parsed = callbackParts(sub.transport.callback);
+      return {
+        id: sub.id,
+        status: sub.status,
+        type: sub.type,
+        version: sub.version,
+        condition: sub.condition,
+        transportMethod: sub.transport.method,
+        callback: { hostname: parsed.hostname, path: parsed.path },
+        createdAt: sub.created_at ?? null,
+        cost: sub.cost ?? null
+      };
+    })
   };
 }

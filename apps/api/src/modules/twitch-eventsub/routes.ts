@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
-import { enqueueEventFromNotification, getEventSubDiagnostics, persistEventSubMessage, reconcileEventSubSubscriptions, recordRevocation } from './service.js';
+import { enqueueEventFromNotification, getEventSubDiagnostics, getLiveEventSubDiagnostics, persistEventSubMessage, reconcileEventSubSubscriptions, recordRevocation } from './service.js';
 import { verifyEventSubSignature } from './signature.js';
 import { normalizeChatMessageEvent } from '../webhooks/service.js';
 import { normalizeChannelPointRedemptionEvent } from '../channel-points/service.js';
@@ -45,13 +45,14 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
     const signature = stringHeader(request.headers['twitch-eventsub-message-signature']);
     const messageType = stringHeader(request.headers['twitch-eventsub-message-type']);
     const rawBody = (request.raw as any).rawBody as Buffer | undefined;
+    request.log.info({ route: '/webhooks/twitch/eventsub', messageId: messageId ?? null, messageType: messageType ?? null }, 'EventSub ingress reached route');
 
     if (!messageId || !timestamp || !signature || !messageType || !rawBody) {
       return reply.code(400).send({ error: 'Missing required EventSub headers or raw body' });
     }
 
     if (!verifyEventSubSignature({ secret: options.config.TWITCH_EVENTSUB_SECRET, messageId, timestamp, rawBody, signature })) {
-      request.log.warn({ messageId, messageType }, 'Rejected Twitch EventSub request with invalid signature');
+      request.log.warn({ messageId, messageType, subscriptionType: stringHeader(request.headers['twitch-eventsub-subscription-type']) ?? null, signatureValid: false }, 'EventSub ingress signature invalid');
       return reply.code(403).send({ error: 'Invalid Twitch EventSub signature' });
     }
 
@@ -62,6 +63,14 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
       headers: selectedHeaders(request.headers),
       payload
     });
+    request.log.info({
+      messageId,
+      messageType,
+      subscriptionType: payload?.subscription?.type ?? stringHeader(request.headers['twitch-eventsub-subscription-type']) ?? null,
+      signatureValid: true,
+      persisted: !persisted.duplicate,
+      duplicate: persisted.duplicate
+    }, 'EventSub ingress persisted');
 
     if (persisted.duplicate) {
       return reply.code(204).send();
@@ -96,5 +105,10 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
   app.get('/api/admin/twitch/eventsub/status', async (_request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;
     return getEventSubDiagnostics(options.db, options.config);
+  });
+
+  app.get('/api/admin/twitch/eventsub/live', async (_request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    return getLiveEventSubDiagnostics(options.config);
   });
 }
