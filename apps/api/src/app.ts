@@ -14,6 +14,7 @@ import { registerAppApiRoutes } from './modules/apps/routes.js';
 import { startTwitchTokenWorker } from './modules/twitch/worker.js';
 import { startOutgoingChatWorker } from './modules/twitch-chat/worker.js';
 import { registerTwitchEventSubRoutes } from './modules/twitch-eventsub/routes.js';
+import { registerDocsRoutes } from './modules/docs/routes.js';
 import { startEventSubReconciliationWorker } from './modules/twitch-eventsub/worker.js';
 import { startWebhookDeliveryWorker } from './modules/webhooks/service.js';
 
@@ -51,6 +52,7 @@ export async function buildApp(options: BuildAppOptions) {
   await registerAppApiRoutes(app as any, { config, db: options.db });
   await registerAdminApiRoutes(app as any, { config, db: options.db });
   await registerTwitchEventSubRoutes(app as any, { config, db: options.db });
+  await registerDocsRoutes(app as any);
   startTwitchTokenWorker(app as any, config, options.db);
   startEventSubReconciliationWorker(app as any, config, options.db);
   startWebhookDeliveryWorker(app as any, options.db);

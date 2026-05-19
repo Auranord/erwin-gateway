@@ -76,7 +76,8 @@ function requireDatabase(db: Database | undefined, reply: FastifyReply): db is D
 
 function authorizeAdmin(config: AppConfig, request: FastifyRequest, reply: FastifyReply) {
   if (!config.INTERNAL_ADMIN_API_KEY) {
-    return true;
+    reply.code(503).send({ error: 'Admin authentication is not configured' });
+    return false;
   }
 
   const adminHeader = request.headers['x-admin-api-key'];
@@ -195,16 +196,17 @@ async function upsertDefaultWebhook(db: Database, appId: string, webhookUrl?: st
 
 export async function registerAdminApiRoutes(app: FastifyInstance, options: AdminRouteOptions) {
   app.addHook('preHandler', async (request, reply) => {
-    if (request.url.startsWith('/api/admin/') && !authorizeAdmin(options.config, request, reply)) {
+    const isTwitchOAuthCallback = /^\/api\/admin\/twitch\/(bot|broadcaster)\/callback(?:\?|$)/.test(request.url);
+    if (request.url.startsWith('/api/admin/') && !isTwitchOAuthCallback && !authorizeAdmin(options.config, request, reply)) {
       return;
     }
   });
 
   app.get('/api/admin/shell', async () => ({
     service: 'erwin-gateway',
-    phase: 'phase-9-twitch-data',
+    phase: 'phase-10-mvp-hardening',
     pages: adminPages,
-    adminAuth: options.config.INTERNAL_ADMIN_API_KEY ? 'internal_admin_api_key' : 'not_configured_for_development',
+    adminAuth: 'internal_admin_api_key',
     message: 'Admin UI shell is available with app registry, Twitch setup, outgoing queue, and text command management.'
   }));
 

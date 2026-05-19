@@ -1,52 +1,79 @@
-# Twitch auth
+# Twitch auth and EventSub setup
 
-Phase 3 implements Twitch OAuth setup for `erwin-gateway` without IRC and without EventSub subscription creation.
+`erwin-gateway` uses Twitch OAuth authorization-code flow for two identities:
 
-## Required environment variables
+- **Bot account**: sends and receives chat as the bot and qualifies for Twitch chat bot behavior.
+- **Broadcaster account**: owns Channel Point rewards, redemptions, subscriptions, Bits, stream/profile/schedule access, and EventSub subscriptions.
 
-- `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` identify the registered Twitch application.
-- `PUBLIC_API_URL` or `PUBLIC_APP_URL` is used to build OAuth callback URLs.
-- `TOKEN_ENCRYPTION_KEY` is required before storing user access and refresh tokens. Use a 32-byte UTF-8 string, 64-character hex string, or 32-byte base64 value.
-- `INTERNAL_ADMIN_API_KEY` protects the admin setup routes when configured.
+## Twitch app setup
 
-## Registered Twitch callback URLs
+1. Open the Twitch Developer Console.
+2. Create or select the Twitch application for `erwin-gateway`.
+3. Set OAuth redirect URLs for the public API origin:
+   - `https://gateway.example.com/api/admin/twitch/bot/callback`
+   - `https://gateway.example.com/api/admin/twitch/broadcaster/callback`
+4. Store the client ID and client secret in deployment secrets:
+   - `TWITCH_CLIENT_ID`
+   - `TWITCH_CLIENT_SECRET`
+5. Generate a strong `TWITCH_EVENTSUB_SECRET` and configure `TWITCH_EVENTSUB_CALLBACK_URL` as:
+   - `https://gateway.example.com/webhooks/twitch/eventsub`
 
-Register these callback URLs in the Twitch developer console for the same base URL configured in `PUBLIC_API_URL` or `PUBLIC_APP_URL`:
+## Bot account OAuth
 
-- `/api/admin/twitch/bot/callback`
-- `/api/admin/twitch/broadcaster/callback`
+From the admin UI Twitch Setup page, start **Connect bot account**. The bot account should be the dedicated Twitch bot user, not the broadcaster unless you intentionally use one account for both roles.
 
-## OAuth flow
+Required bot scopes by feature:
 
-1. An admin opens the Twitch Setup page.
-2. The UI calls `POST /api/admin/twitch/bot/login/start` or `POST /api/admin/twitch/broadcaster/login/start`.
-3. The API creates a one-time CSRF `state`, stores it temporarily in `gateway_settings`, and returns a Twitch authorization URL using authorization-code flow.
-4. Twitch redirects back to the role-specific callback with `code` and `state`.
-5. The callback validates `state`, exchanges the code for user access/refresh tokens, validates the access token with Twitch, and stores encrypted tokens in `twitch_tokens`.
-6. Setup status and deep health report connected accounts, granted scopes, missing scopes, expiry, and refresh errors.
+| Feature | Required scopes |
+| --- | --- |
+| Receive chat through EventSub `channel.chat.message` as a bot | `user:read:chat`, `user:bot` |
+| Send chat through Twitch Send Chat Message API | `user:write:chat`, `user:bot` |
+| Bot relationship with broadcaster | broadcaster must also grant `channel:bot` |
 
-## Required scopes
+## Broadcaster OAuth
 
-Bot account:
+From the admin UI Twitch Setup page, start **Connect broadcaster account** while logged in as the broadcaster/channel owner.
 
-- `user:read:chat`
-- `user:write:chat`
-- `user:bot`
+Required broadcaster scopes by feature:
 
-Broadcaster account:
+| Feature | Required scopes |
+| --- | --- |
+| Allow bot chat integration | `channel:bot` |
+| Channel Point reward create/update/delete/sync | `channel:manage:redemptions` |
+| Channel Point redemption events and status reads | `channel:read:redemptions`, `channel:manage:redemptions` |
+| Fulfill/cancel redemptions | `channel:manage:redemptions` |
+| Subscription EventSub/backfill | `channel:read:subscriptions` |
+| Bits cheer events/leaderboard | `bits:read` |
+| Stream online/offline and stream/profile/schedule reads | no extra user scope for public reads; broadcaster OAuth is still required for gateway ownership and diagnostics |
 
-- `channel:bot`
-- `channel:manage:redemptions`
-- `channel:read:redemptions`
-- `channel:read:subscriptions`
-- `bits:read`
+## Scope troubleshooting
 
-Missing required scopes make Twitch setup and deep health degraded.
+Missing scopes make Twitch setup and `GET /api/v1/health/deep` degraded.
+
+1. Check the Twitch Setup page or deep health `checks.twitch.missingScopes`.
+2. Confirm whether the missing scope belongs to the bot or broadcaster role.
+3. Update the gateway code/config only if the desired feature changed; otherwise reconnect the affected account from the admin UI.
+4. If EventSub subscriptions are revoked, fix the missing scope and run EventSub sync.
+5. If token refresh fails, reconnect the affected account; raw tokens are never shown in the UI or logs.
+
+Common problems:
+
+- Connecting the broadcaster while logged in as the bot account causes reward/subscription/Bits failures.
+- Forgetting broadcaster `channel:bot` causes chat bot EventSub/send authorization problems.
+- Rotating the Twitch client secret requires updating the deployment secret and restarting the API.
+- OAuth redirect URL mismatch causes Twitch to reject the callback before the gateway receives a code.
+
+## EventSub callback requirements
+
+- Public HTTPS URL reachable by Twitch: `TWITCH_EVENTSUB_CALLBACK_URL`.
+- Gateway endpoint: `POST /webhooks/twitch/eventsub`.
+- The endpoint verifies Twitch headers and the raw body with `TWITCH_EVENTSUB_SECRET`.
+- Challenge requests return the exact challenge as `text/plain`.
+- Notification requests are persisted, deduped by Twitch message ID, normalized, and fanned out to app webhooks.
+- Revocation requests mark subscriptions unhealthy so health/admin diagnostics can drive repair.
 
 ## Security choices
 
-- User tokens are encrypted at rest with AES-256-GCM using `TOKEN_ENCRYPTION_KEY`.
-- Token ciphertext is stored in `twitch_tokens`; raw access tokens and refresh tokens are never returned to the UI.
-- Log redaction covers authorization headers, OAuth tokens, client secrets, encryption keys, and raw API keys.
-- OAuth `state` is random, role-bound, callback-bound, and expires after 10 minutes.
-- The proactive worker refreshes tokens before expiry and records refresh errors without persisting raw secrets.
+- User access/refresh tokens are encrypted at rest with `TOKEN_ENCRYPTION_KEY`.
+- Raw Twitch tokens, OAuth codes, Twitch client secret, EventSub secret, Authorization headers, cookies, API keys, and webhook secrets are redacted from logs.
+- Admin setup routes require `INTERNAL_ADMIN_API_KEY`.

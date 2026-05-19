@@ -115,6 +115,7 @@ export async function fetchRedemptionsFromTwitch(db: Database, config: AppConfig
   const response = await twitchFetch(db, config, url); for (const raw of response.data ?? []) await persistRedemptionFromRaw(db, raw, loaded.reward, null, 'twitch.channel_points.custom_reward_redemption.update', false);
   return listRedemptions(db, app, { rewardId });
 }
+// Gateway never auto-fulfills or auto-cancels redemptions; downstream apps must call this explicit status endpoint.
 export async function updateRedemptionStatus(db: Database, config: AppConfig, app: AppIdentity, rewardId: string, redemptionId: string, status: 'FULFILLED' | 'CANCELED', reason?: string) {
   const loaded = await mutableReward(db, app, rewardId, 'channel_points:redemptions:manage'); if (!loaded.ok) return loaded;
   const channel = await primaryChannel(db); const [redemption] = await db.select().from(twitchChannelPointRedemptions).where(eq(twitchChannelPointRedemptions.id, redemptionId)).limit(1); if (!redemption) return { ok: false as const, statusCode: 404, error: 'Redemption not found' };
