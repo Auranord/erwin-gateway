@@ -79,7 +79,7 @@ channel.chat.notification
 channel.chat.message_delete
 channel.chat.clear
 channel.chat.clear_user_messages
-channel.chat.settings.update
+channel.chat_settings.update
 ```
 
 Minimum hard requirement for chat migration is `channel.chat.message`.
