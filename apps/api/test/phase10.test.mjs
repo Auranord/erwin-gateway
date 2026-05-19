@@ -29,6 +29,40 @@ test('generated API docs expose /openapi.json and /docs', async () => {
   await app.close();
 });
 
+test('serves admin SPA routes while preserving API/docs behavior', async () => {
+  const app = await buildApp({ config });
+
+  const root = await app.inject({ method: 'GET', url: '/' });
+  assert.equal(root.statusCode, 200);
+  assert.match(root.headers['content-type'] ?? '', /text\/html/);
+
+  const admin = await app.inject({ method: 'GET', url: '/admin' });
+  assert.equal(admin.statusCode, 200);
+  assert.match(admin.headers['content-type'] ?? '', /text\/html/);
+
+  const adminNested = await app.inject({ method: 'GET', url: '/admin/some/page' });
+  assert.equal(adminNested.statusCode, 200);
+  assert.match(adminNested.headers['content-type'] ?? '', /text\/html/);
+
+  const docs = await app.inject({ method: 'GET', url: '/docs' });
+  assert.equal(docs.statusCode, 200);
+  assert.match(docs.body, /SwaggerUIBundle/);
+
+  const live = await app.inject({ method: 'GET', url: '/api/v1/health/live' });
+  assert.equal(live.statusCode, 200);
+  assert.equal(live.json().status, 'healthy');
+
+  const unknownApi = await app.inject({ method: 'GET', url: '/api/v1/does-not-exist' });
+  assert.equal(unknownApi.statusCode, 404);
+  assert.deepEqual(unknownApi.json(), { error: 'Not Found', service: 'erwin-gateway' });
+
+  const webhookUnknown = await app.inject({ method: 'GET', url: '/webhooks/not-found' });
+  assert.equal(webhookUnknown.statusCode, 404);
+  assert.deepEqual(webhookUnknown.json(), { error: 'Not Found', service: 'erwin-gateway' });
+
+  await app.close();
+});
+
 test('app API keys are hashed and comparable without raw key storage', () => {
   const generated = generateAppApiKey(config);
   assert.match(generated.rawKey, /^egw_dev_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+$/);

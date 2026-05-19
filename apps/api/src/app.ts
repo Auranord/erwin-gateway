@@ -34,6 +34,10 @@ export interface StartupReadiness {
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function isSpaRoute(url: string) {
+  return url === '/' || url === '/admin' || url.startsWith('/admin/');
+}
+
 export async function buildApp(options: BuildAppOptions) {
   const { config, pool } = options;
   const logger = createLogger(config);
@@ -102,18 +106,17 @@ export async function buildApp(options: BuildAppOptions) {
     app.log.warn({ startupReadiness }, 'workers not started because startup readiness checks failed');
   }
 
-  const webDist = path.resolve(dirname, '../../../web/dist');
+  const webDist = path.resolve(dirname, '../../web/dist');
   const hasWebDist = fs.existsSync(webDist);
   if (hasWebDist) {
     await app.register(fastifyStatic, {
       root: webDist,
-      prefix: '/',
-      decorateReply: false
+      prefix: '/'
     });
   }
 
   app.setNotFoundHandler((request, reply) => {
-    if (hasWebDist && request.raw.method === 'GET' && !request.url.startsWith('/api/')) {
+    if (hasWebDist && request.raw.method === 'GET' && isSpaRoute(request.url)) {
       return reply.sendFile('index.html');
     }
 
