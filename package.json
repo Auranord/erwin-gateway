@@ -16,7 +16,8 @@
     "build": "npm run build --workspace @erwin-gateway/shared && npm run build --workspace @erwin-gateway/api && npm run build --workspace @erwin-gateway/web",
     "start": "npm run start --workspace @erwin-gateway/api",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
+    "db:migrate": "node apps/api/dist/db/migrate.js",
+    "db:migrate:dev": "drizzle-kit migrate --config drizzle.config.ts",
     "test": "npm run build && node --test apps/api/test/*.test.mjs"
   },
   "engines": {

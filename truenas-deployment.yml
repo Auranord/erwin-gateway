@@ -44,11 +44,27 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
-    command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
+    command: ["node", "apps/api/dist/server.js"]
 
     volumes:
       - /mnt/fast/config/erwin-gateway/logs:/app/logs
+
+  migrate:
+    image: ghcr.io/auranord/erwin-gateway:main
+    container_name: erwin-gateway-migrate
+    restart: "no"
+    pull_policy: always
+    environment:
+      NODE_ENV: production
+      TZ: Europe/Berlin
+      DATABASE_URL: postgres://erwin_gateway:CHANGE_ME@postgres:5432/erwin_gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["npm", "run", "db:migrate"]
 
   postgres:
     image: postgres:16-alpine
