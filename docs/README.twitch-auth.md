@@ -10,8 +10,8 @@
 1. Open the Twitch Developer Console.
 2. Create or select the Twitch application for `erwin-gateway`.
 3. Set OAuth redirect URLs for the public API origin:
-   - `https://gateway.example.com/api/admin/twitch/bot/callback`
-   - `https://gateway.example.com/api/admin/twitch/broadcaster/callback`
+   - `https://gateway.example.com/api/v1/twitch/oauth/bot/callback`
+   - `https://gateway.example.com/api/v1/twitch/oauth/broadcaster/callback`
 4. Store the client ID and client secret in deployment secrets:
    - `TWITCH_CLIENT_ID`
    - `TWITCH_CLIENT_SECRET`
