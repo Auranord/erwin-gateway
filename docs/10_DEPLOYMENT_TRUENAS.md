@@ -1,4 +1,4 @@
-# 10 TrueNAS / Compose Deployment
+# 10 TrueNAS SCALE Deployment
 
 ## Requirements
 
@@ -7,11 +7,12 @@ Provide:
 - `Dockerfile`
 - `.dockerignore`
 - `.env.example`
-- `docker-compose.example.yml`
+- `truenas-deployment.yml`
 - GHCR workflow for `dev` and `main`
 - Healthcheck compatible with wget/curl
 - Persistent Postgres volume
 - Optional logs volume
+- One-shot `migrate` service that runs before API startup
 
 ## Environment variables
 
@@ -39,7 +40,7 @@ TWITCH_CHANNEL_LOGIN=...
 LOG_HEALTHCHECK_REQUESTS=false
 ```
 
-## Compose example shape
+## TrueNAS deployment file shape
 
 ```yaml
 services:
@@ -81,9 +82,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
+      migrate:
+        condition: service_completed_successfully
+    command: ["node", "apps/api/dist/server.js"]
     volumes:
       - /mnt/fast/config/erwin-gateway/logs:/app/logs
+
+  migrate:
+    image: ghcr.io/auranord/erwin-gateway:main
+    container_name: erwin-gateway-migrate
+    restart: "no"
+    pull_policy: always
+    environment:
+      NODE_ENV: production
+      TZ: Europe/Berlin
+      DATABASE_URL: postgres://erwin_gateway:CHANGE_ME@postgres:5432/erwin_gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["npm", "run", "db:migrate"]
 
   postgres:
     image: postgres:16-alpine
@@ -102,15 +119,35 @@ services:
       retries: 10
 ```
 
-Adminer is optional and should not be included by default because this service stores sensitive Twitch token material.
+## Migration behavior
 
-## Automatic migrations on deploy
+Production migration command:
 
-TrueNAS SCALE Compose should run migrations automatically in the API startup command:
+`npm run db:migrate` → `node apps/api/dist/db/migrate.js`
 
-`command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]`
+Development migration command:
 
-If `db:migrate` fails, the API process does not start; fix the migration error and redeploy.
+`npm run db:migrate:dev` → `drizzle-kit migrate --config drizzle.config.ts`
+
+The `migrate` service runs once and exits. The API container never runs `drizzle-kit` at startup.
+
+## Troubleshooting
+
+- **`relation "twitch_accounts" does not exist`**
+  - Cause: schema was not migrated yet.
+  - Fix: `docker compose run --rm migrate`, then verify `psql -d erwin_gateway -c '\dt'` includes gateway tables.
+
+- **Migrations missing in container**
+  - Cause: image does not include `drizzle/` or compiled migration runner.
+  - Fix: rebuild and publish image, then verify files exist in container (`/app/drizzle`, `/app/apps/api/dist/db/migrate.js`).
+
+- **`migrate` service failed**
+  - Check logs: `docker compose logs migrate`.
+  - Common causes: wrong `DATABASE_URL`, Postgres not healthy, or DB credentials mismatch.
+
+- **API waiting for migrations**
+  - `erwin-gateway` depends on `migrate: service_completed_successfully`.
+  - If API does not start, inspect `docker compose ps` and `docker compose logs migrate` first.
 
 ## Image tags
 
