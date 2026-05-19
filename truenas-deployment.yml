@@ -1,6 +1,19 @@
 version: "3.9"
 
 services:
+  erwin-gateway-migrate:
+    image: ghcr.io/your-org/erwin-gateway:latest
+    container_name: erwin-gateway-migrate
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: UTC
+      DATABASE_URL: postgres://erwin:change-me@postgres:5432/erwin_gateway
+    command: ["npm", "run", "db:migrate"]
+
   erwin-gateway:
     image: ghcr.io/your-org/erwin-gateway:latest
     container_name: erwin-gateway
@@ -45,6 +58,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      erwin-gateway-migrate:
+        condition: service_completed_successfully
 
   postgres:
     image: postgres:16-alpine
