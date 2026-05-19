@@ -1,50 +1,36 @@
-version: "3.9"
-
 services:
-  erwin-gateway-migrate:
-    image: ghcr.io/your-org/erwin-gateway:latest
-    container_name: erwin-gateway-migrate
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      TZ: UTC
-      DATABASE_URL: postgres://erwin:change-me@postgres:5432/erwin_gateway
-    command: ["npm", "run", "db:migrate"]
-
   erwin-gateway:
-    image: ghcr.io/your-org/erwin-gateway:latest
+    image: ghcr.io/auranord/erwin-gateway:main
     container_name: erwin-gateway
     restart: unless-stopped
+    pull_policy: always
     ports:
-      - "3000:3000"
+      - "3100:3000"
     environment:
       NODE_ENV: production
-      TZ: UTC
+      TZ: Europe/Berlin
       HOST: 0.0.0.0
       PORT: 3000
 
-      DATABASE_URL: postgres://erwin:change-me@postgres:5432/erwin_gateway
-      PUBLIC_APP_URL: https://gateway.example.com
-      PUBLIC_API_URL: https://gateway.example.com
-      TWITCH_EVENTSUB_CALLBACK_URL: https://gateway.example.com/webhooks/twitch/eventsub
-      CORS_ORIGIN: https://gateway.example.com
+      DATABASE_URL: postgres://erwin_gateway:CHANGE_ME@postgres:5432/erwin_gateway
+      PUBLIC_APP_URL: https://erwin-gateway.auranord.net
+      PUBLIC_API_URL: https://erwin-gateway.auranord.net
+      TWITCH_EVENTSUB_CALLBACK_URL: https://erwin-gateway.auranord.net/webhooks/twitch/eventsub
+      CORS_ORIGIN: https://erwin-gateway.auranord.net
 
-      SESSION_SECRET: change-me-session-secret-min-32
-      TOKEN_ENCRYPTION_KEY: change-me-token-encryption-key-min-32
-      API_KEY_PEPPER: change-me-api-key-pepper-min-16
-      INTERNAL_ADMIN_API_KEY: change-me-admin-api-key-min-16
+      SESSION_SECRET: CHANGE_ME
+      TOKEN_ENCRYPTION_KEY: CHANGE_ME
+      API_KEY_PEPPER: CHANGE_ME
+      INTERNAL_ADMIN_API_KEY: CHANGE_ME
 
-      TWITCH_CLIENT_ID: your-twitch-client-id
-      TWITCH_CLIENT_SECRET: your-twitch-client-secret
-      TWITCH_EVENTSUB_SECRET: change-me-long-random-secret
+      TWITCH_CLIENT_ID: CHANGE_ME
+      TWITCH_CLIENT_SECRET: CHANGE_ME
+      TWITCH_EVENTSUB_SECRET: CHANGE_ME
 
-      TWITCH_BOT_LOGIN: your-bot-login
-      TWITCH_BOT_USER_ID: your-bot-user-id
-      TWITCH_BROADCASTER_ID: your-broadcaster-user-id
-      TWITCH_CHANNEL_LOGIN: your-channel-login
+      TWITCH_BOT_LOGIN: doktorerwin
+      TWITCH_BOT_USER_ID: "103901663"
+      TWITCH_BROADCASTER_ID: "53471337"
+      TWITCH_CHANNEL_LOGIN: notthatkindofheroes
 
       LOG_HEALTHCHECK_REQUESTS: "false"
 
@@ -58,7 +44,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
     command: ["sh", "-lc", "npm run db:migrate && node apps/api/dist/server.js"]
+
+    volumes:
+      - /mnt/fast/config/erwin-gateway/logs:/app/logs
 
   postgres:
     image: postgres:16-alpine
@@ -66,15 +56,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: erwin_gateway
-      POSTGRES_USER: erwin
-      POSTGRES_PASSWORD: change-me
+      POSTGRES_USER: erwin_gateway
+      POSTGRES_PASSWORD: CHANGE_ME
     volumes:
-      - erwin_gateway_postgres:/var/lib/postgresql/data
+      - /mnt/fast/config/erwin-gateway/postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U erwin -d erwin_gateway"]
+      test: ["CMD-SHELL", "pg_isready -U erwin_gateway -d erwin_gateway"]
       interval: 10s
       timeout: 5s
       retries: 10
-
-volumes:
-  erwin_gateway_postgres:
