@@ -3,14 +3,14 @@ FROM node:22-alpine AS base
 WORKDIR /app
 
 FROM base AS deps
-COPY package*.json tsconfig.base.json ./
-COPY apps/api/package.json apps/api/package.json
-COPY apps/web/package.json apps/web/package.json
-COPY packages/shared/package.json packages/shared/package.json
+COPY . .
 RUN npm ci --no-audit --no-fund
 
 FROM deps AS build
-COPY . .
+ARG BUILD_SHA=unknown
+ARG BUILD_BRANCH=unknown
+ENV BUILD_SHA=$BUILD_SHA
+ENV BUILD_BRANCH=$BUILD_BRANCH
 RUN npm run build
 
 FROM node:22-alpine AS runtime
