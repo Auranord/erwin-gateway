@@ -28,10 +28,12 @@ const chatTypes = [
   'channel.chat.message_delete',
   'channel.chat.clear',
   'channel.chat.clear_user_messages',
-  'channel.chat.settings.update'
+  'channel.chat_settings.update'
 ];
 
 export const supportedEventSubTypes = [...chatTypes, ...broadcasterOnlyTypes];
+export const requiredEventSubTypes = ['channel.chat.message'];
+export const optionalEventSubTypes = ['channel.chat_settings.update'];
 
 export function eventSubCallbackUrl(config: AppConfig) {
   const base = config.TWITCH_EVENTSUB_CALLBACK_URL ?? config.PUBLIC_API_URL ?? config.PUBLIC_APP_URL;

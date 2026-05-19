@@ -128,9 +128,18 @@ test('simple text command cooldown is enforced', () => {
 test('health degrades when required Twitch scopes are missing', () => {
   const source = readSource('modules/health/routes.ts');
   assert.match(source, /missingScopes/, 'deep health must report missing scopes');
+  assert.match(source, /missingRequiredSubscriptions/, 'deep health must report required EventSub gaps separately');
+  assert.match(source, /missingOptionalSubscriptions/, 'deep health must report optional EventSub gaps separately');
+  assert.match(source, /chatMessageSubscriptionHealthy/, 'deep health must explicitly report chat message subscription health');
   assert.match(source, /channel:read:subscriptions/, 'subscription scope must affect health');
   assert.match(source, /bits:read/, 'bits scope must affect health');
   assert.match(source, /status = 'degraded'/, 'missing scopes must be able to degrade health');
+});
+
+test('desired EventSub subscriptions use Twitch chat settings type name', () => {
+  const source = readSource('modules/twitch-eventsub/desired.ts');
+  assert.match(source, /channel\.chat_settings\.update/, 'desired EventSub types must use official chat settings type');
+  assert.doesNotMatch(source, /channel\.chat\.settings\.update/, 'legacy typo must not be present');
 });
 
 test('final security checks cover token logging, raw API key storage, redaction, and admin route protection', () => {

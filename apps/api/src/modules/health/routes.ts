@@ -5,6 +5,7 @@ import type { Database } from '../../db/client.js';
 import type { HealthResponse } from '@erwin-gateway/shared';
 import { getTwitchSetupStatus } from '../twitch/service.js';
 import { getEventSubDiagnostics } from '../twitch-eventsub/service.js';
+import { optionalEventSubTypes, requiredEventSubTypes } from '../twitch-eventsub/desired.js';
 import { getOutgoingChatHealth } from '../twitch-chat/service.js';
 import { channelPointDiagnostics } from '../channel-points/service.js';
 import { twitchDataDiagnostics } from '../twitch-data.js';
@@ -122,11 +123,15 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
           lastDelivery: eventSub.lastDelivery,
           subscriptionCount: eventSub.subscriptions.length,
           missingSubscriptions: eventSub.missingSubscriptions,
+          missingRequiredSubscriptions: eventSub.missingSubscriptions.filter((sub) => requiredEventSubTypes.includes(sub.type)),
+          missingOptionalSubscriptions: eventSub.missingSubscriptions.filter((sub) => optionalEventSubTypes.includes(sub.type)),
+          chatMessageSubscriptionHealthy: !eventSub.missingSubscriptions.some((sub) => sub.type === 'channel.chat.message'),
           revokedSubscriptions: eventSub.revokedSubscriptions,
           duplicateCount: eventSub.duplicateCount,
           desiredError: eventSub.desiredError
         };
-        if (!eventSub.healthy) status = 'degraded';
+        const missingRequired = eventSub.missingSubscriptions.some((sub) => requiredEventSubTypes.includes(sub.type));
+        if (eventSub.desiredError || missingRequired || eventSub.revokedSubscriptions.length > 0) status = 'degraded';
 
         const outgoingChat = await getOutgoingChatHealth(options.db);
         checks.queues = {
