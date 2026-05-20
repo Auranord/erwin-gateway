@@ -14,6 +14,41 @@ const config = {
 };
 
 function readSource(path) { return fs.readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8'); }
+function signEventSub({ secret, messageId, timestamp, rawBody }) {
+  return `sha256=${crypto.createHmac('sha256', secret).update(messageId).update(timestamp).update(rawBody).digest('hex')}`;
+}
+
+function createEventSubDbMock() {
+  const state = { messageIds: new Set(), persistedEvents: [] };
+  return {
+    state,
+    db: {
+      insert(table) {
+        return {
+          values(values) {
+            if (values && typeof values === 'object' && 'messageId' in values && 'messageType' in values && 'headers' in values) {
+              const messageId = values.messageId;
+              if (state.messageIds.has(messageId)) {
+                const error = new Error('duplicate');
+                error.code = '23505';
+                throw error;
+              }
+              state.messageIds.add(messageId);
+              return { returning: async () => [{ id: state.messageIds.size, ...values }] };
+            }
+            if (values && typeof values === 'object' && 'source' in values && values.source === 'twitch_eventsub') state.persistedEvents.push(values);
+            return {
+              returning: async () => [],
+              onConflictDoNothing() { return Promise.resolve(); }
+            };
+          }
+        };
+      },
+      update() { return { set: () => ({ where: async () => {} }) }; },
+      select() { return { from: () => ({ where: () => ({ limit: async () => [] }), orderBy: () => ({ limit: async () => [] }) }) }; }
+    }
+  };
+}
 
 test('generated API docs expose /openapi.json and /docs', async () => {
   const app = await buildApp({ config });
@@ -176,6 +211,58 @@ test('EventSub ingress route covers rawBody diagnostics, challenge retry behavio
 
 test('Fastify JSON parser captures raw body bytes for EventSub signature verification with charset variants', () => {
   const source = readSource('app.ts');
+  assert.match(source, /removeContentTypeParser\('application\/json'\)/);
   assert.match(source, /addContentTypeParser\(\/\^application\\\/json\(\?:\\s\*;\.\*\)\?\$\/i, \{ parseAs: 'buffer' \}/);
+  assert.match(source, /\(request as any\)\.rawBody = body/);
   assert.match(source, /\(request\.raw as any\)\.rawBody = body/);
+});
+
+test('EventSub ingress challenge/notification behaviors and raw-body validations', async () => {
+  const eventsubSecret = 'eventsub-secret-very-long';
+  const { db, state } = createEventSubDbMock();
+  const app = await buildApp({ config: { ...config, TWITCH_EVENTSUB_SECRET: eventsubSecret }, db });
+  const baseHeaders = {
+    'content-type': 'application/json',
+    'twitch-eventsub-message-id': 'msg-1',
+    'twitch-eventsub-message-timestamp': '2026-05-20T00:00:00Z'
+  };
+
+  const challengeBody = JSON.stringify({ challenge: 'abc', subscription: { type: 'channel.chat.message', version: '1' } });
+  const challengeSig = signEventSub({ secret: eventsubSecret, messageId: 'msg-1', timestamp: baseHeaders['twitch-eventsub-message-timestamp'], rawBody: Buffer.from(challengeBody) });
+  for (const contentType of ['application/json', 'application/json; charset=utf-8']) {
+    const response = await app.inject({ method: 'POST', url: '/webhooks/twitch/eventsub', headers: { ...baseHeaders, 'content-type': contentType, 'twitch-eventsub-message-type': 'webhook_callback_verification', 'twitch-eventsub-message-signature': challengeSig }, payload: challengeBody });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['content-type'], 'text/plain');
+    assert.equal(response.body, 'abc');
+  }
+
+  const notifBody = JSON.stringify({ subscription: { type: 'unknown.type', version: '1' }, event: { id: 'evt-1' } });
+  const notifSig = signEventSub({ secret: eventsubSecret, messageId: 'msg-2', timestamp: baseHeaders['twitch-eventsub-message-timestamp'], rawBody: Buffer.from(notifBody) });
+  for (const contentType of ['application/json', 'application/json;charset=utf-8']) {
+    const response = await app.inject({ method: 'POST', url: '/webhooks/twitch/eventsub', headers: { ...baseHeaders, 'content-type': contentType, 'twitch-eventsub-message-id': contentType.includes('charset') ? 'msg-3' : 'msg-2', 'twitch-eventsub-message-type': 'notification', 'twitch-eventsub-message-signature': signEventSub({ secret: eventsubSecret, messageId: contentType.includes('charset') ? 'msg-3' : 'msg-2', timestamp: baseHeaders['twitch-eventsub-message-timestamp'], rawBody: Buffer.from(notifBody) }) }, payload: notifBody });
+    assert.equal(response.statusCode, 204);
+  }
+  assert.ok(state.persistedEvents.length >= 2);
+
+  const duplicateNotif = await app.inject({ method: 'POST', url: '/webhooks/twitch/eventsub', headers: { ...baseHeaders, 'twitch-eventsub-message-id': 'msg-2', 'twitch-eventsub-message-type': 'notification', 'twitch-eventsub-message-signature': notifSig }, payload: notifBody });
+  assert.equal(duplicateNotif.statusCode, 204);
+
+  const duplicateChallenge = await app.inject({ method: 'POST', url: '/webhooks/twitch/eventsub', headers: { ...baseHeaders, 'twitch-eventsub-message-type': 'webhook_callback_verification', 'twitch-eventsub-message-signature': challengeSig }, payload: challengeBody });
+  assert.equal(duplicateChallenge.statusCode, 200);
+  assert.equal(duplicateChallenge.body, 'abc');
+
+  const appWithoutRawBody = await buildApp({ config: { ...config, TWITCH_EVENTSUB_SECRET: eventsubSecret }, db });
+  appWithoutRawBody.addHook('preHandler', async (request) => {
+    if (request.url === '/webhooks/twitch/eventsub') {
+      delete request.rawBody;
+      delete request.raw.rawBody;
+    }
+  });
+  const missingRawBody = await appWithoutRawBody.inject({ method: 'POST', url: '/webhooks/twitch/eventsub', headers: { ...baseHeaders, 'twitch-eventsub-message-id': 'msg-missing-raw', 'twitch-eventsub-message-type': 'notification', 'twitch-eventsub-message-signature': 'sha256=fake' }, payload: notifBody });
+  assert.equal(missingRawBody.statusCode, 400);
+  await appWithoutRawBody.close();
+
+  const invalidSignature = await app.inject({ method: 'POST', url: '/webhooks/twitch/eventsub', headers: { ...baseHeaders, 'twitch-eventsub-message-id': 'msg-invalid', 'twitch-eventsub-message-type': 'notification', 'twitch-eventsub-message-signature': 'sha256=bad' }, payload: notifBody });
+  assert.equal(invalidSignature.statusCode, 403);
+  await app.close();
 });

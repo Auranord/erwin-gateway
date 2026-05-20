@@ -51,7 +51,9 @@ export async function buildApp(options: BuildAppOptions) {
     credentials: true
   });
 
+  app.removeContentTypeParser('application/json');
   app.addContentTypeParser(/^application\/json(?:\s*;.*)?$/i, { parseAs: 'buffer' }, (request, body, done) => {
+    (request as any).rawBody = body;
     (request.raw as any).rawBody = body;
     try {
       done(null, body.length ? JSON.parse(body.toString('utf8')) : {});
