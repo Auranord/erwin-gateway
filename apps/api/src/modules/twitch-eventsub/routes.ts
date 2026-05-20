@@ -36,7 +36,7 @@ function selectedHeaders(headers: Record<string, string | string[] | undefined>)
 }
 
 export async function registerTwitchEventSubRoutes(app: FastifyInstance, options: EventSubRouteOptions) {
-  app.post('/webhooks/twitch/eventsub', async (request, reply) => {
+  app.post('/webhooks/twitch/eventsub', { config: { rawBody: true } }, async (request, reply) => {
     try {
     if (!requireDatabase(options.db, reply)) return reply;
     if (!options.config.TWITCH_EVENTSUB_SECRET) return reply.code(503).send({ error: 'EventSub secret is not configured' });
@@ -45,7 +45,7 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
     const timestamp = stringHeader(request.headers['twitch-eventsub-message-timestamp']);
     const signature = stringHeader(request.headers['twitch-eventsub-message-signature']);
     const messageType = stringHeader(request.headers['twitch-eventsub-message-type']);
-    const rawBody = (request.raw as any).rawBody as Buffer | undefined;
+    const rawBody = ((request as any).rawBody ?? (request.raw as any).rawBody) as Buffer | undefined;
     const parsedBody = request.body as unknown;
     const subscriptionType = stringHeader(request.headers['twitch-eventsub-subscription-type']) ?? null;
     request.log.info({ route: '/webhooks/twitch/eventsub', messageId: messageId ?? null, messageType: messageType ?? null }, 'EventSub ingress reached route');
