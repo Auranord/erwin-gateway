@@ -30,6 +30,7 @@ const envSchema = z.object({
   TWITCH_CHANNEL_LOGIN: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   LOG_HEALTHCHECK_REQUESTS: booleanString.default('false'),
+  DEBUG_EVENTSUB_INGRESS: booleanString.default('false'),
   BUILD_SHA: z.string().default('local'),
   BUILD_BRANCH: z.string().default('local'),
   IMAGE_TAG: z.string().default('local')

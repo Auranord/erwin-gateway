@@ -48,7 +48,9 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
     const rawBody = ((request as any).rawBody ?? (request.raw as any).rawBody) as Buffer | undefined;
     const parsedBody = request.body as unknown;
     const subscriptionType = stringHeader(request.headers['twitch-eventsub-subscription-type']) ?? null;
-    request.log.info({ route: '/webhooks/twitch/eventsub', messageId: messageId ?? null, messageType: messageType ?? null }, 'EventSub ingress reached route');
+    if (options.config.DEBUG_EVENTSUB_INGRESS) {
+      request.log.info({ route: '/webhooks/twitch/eventsub', messageId: messageId ?? null, messageType: messageType ?? null }, 'EventSub ingress reached route');
+    }
 
     if (!messageId || !timestamp || !signature || !messageType || !rawBody) {
       request.log.warn({
@@ -77,7 +79,9 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
       reply.header('Content-Type', 'text/plain').code(200).send(payload.challenge);
       persistEventSubMessage(options.db, { messageId, messageType, headers: selectedHeaders(request.headers), payload })
         .then((persisted) => {
-          request.log.info({ messageId, messageType, subscriptionType: payload?.subscription?.type ?? subscriptionType, signatureValid: true, persisted: !persisted.duplicate, duplicate: persisted.duplicate }, 'EventSub ingress persisted');
+          if (options.config.DEBUG_EVENTSUB_INGRESS) {
+            request.log.info({ messageId, messageType, subscriptionType: payload?.subscription?.type ?? subscriptionType, signatureValid: true, persisted: !persisted.duplicate, duplicate: persisted.duplicate }, 'EventSub ingress persisted');
+          }
         })
         .catch((error: unknown) => {
           request.log.error({ messageId, messageType, subscriptionType: payload?.subscription?.type ?? subscriptionType, error: error instanceof Error ? error.message : String(error) }, 'EventSub ingress persistence failed after challenge response');
@@ -86,7 +90,9 @@ export async function registerTwitchEventSubRoutes(app: FastifyInstance, options
     }
 
     const persisted = await persistEventSubMessage(options.db, { messageId, messageType, headers: selectedHeaders(request.headers), payload });
-    request.log.info({ messageId, messageType, subscriptionType: payload?.subscription?.type ?? subscriptionType, signatureValid: true, persisted: !persisted.duplicate, duplicate: persisted.duplicate }, 'EventSub ingress persisted');
+    if (options.config.DEBUG_EVENTSUB_INGRESS) {
+      request.log.info({ messageId, messageType, subscriptionType: payload?.subscription?.type ?? subscriptionType, signatureValid: true, persisted: !persisted.duplicate, duplicate: persisted.duplicate }, 'EventSub ingress persisted');
+    }
 
     if (persisted.duplicate) return reply.code(204).send();
 
