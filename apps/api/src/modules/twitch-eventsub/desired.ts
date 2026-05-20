@@ -60,5 +60,9 @@ export function desiredKey(subscription: Pick<DesiredEventSubSubscription, 'type
 }
 
 export function sortCondition(condition: Record<string, string>) {
-  return Object.fromEntries(Object.entries(condition).sort(([a], [b]) => a.localeCompare(b)));
+  return Object.fromEntries(
+    Object.entries(condition)
+      .filter(([, value]) => typeof value === 'string' && value.length > 0)
+      .sort(([a], [b]) => a.localeCompare(b))
+  );
 }
