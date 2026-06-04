@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AppConfig } from '../../config/env.js';
@@ -308,6 +308,44 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     ]);
 
     return { app: serializeApp(updated, keys, webhook) };
+  });
+
+  app.delete('/api/admin/apps/:id', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'Invalid app id' });
+
+    const [record] = await options.db.select().from(apps).where(eq(apps.id, params.data.id)).limit(1);
+    if (!record) return reply.code(404).send({ error: 'App not found' });
+
+    const archivedAt = new Date();
+    const [archived] = await options.db.update(apps).set({
+      enabled: false,
+      updatedAt: archivedAt
+    }).where(eq(apps.id, record.id)).returning();
+
+    const [revokedKeys, disabledWebhooks] = await Promise.all([
+      options.db.update(appApiKeys).set({
+        revokedAt: archivedAt,
+        updatedAt: archivedAt
+      }).where(and(eq(appApiKeys.appId, record.id), isNull(appApiKeys.revokedAt))).returning(),
+      options.db.update(appWebhookEndpoints).set({
+        enabled: false,
+        updatedAt: archivedAt
+      }).where(eq(appWebhookEndpoints.appId, record.id)).returning()
+    ]);
+
+    await audit(options.db, 'app.archive', 'app', record.id, {
+      slug: record.slug,
+      archivalStrategy: 'soft-disable',
+      previousEnabled: record.enabled,
+      revokedApiKeyIds: revokedKeys.map((key) => key.id),
+      disabledWebhookEndpointIds: disabledWebhooks.map((webhook) => webhook.id)
+    });
+
+    const keys = await options.db.select().from(appApiKeys).where(eq(appApiKeys.appId, record.id)).orderBy(desc(appApiKeys.createdAt));
+    const webhook = await getFirstWebhook(options.db, record.id);
+    return { app: serializeApp(archived ?? { ...record, enabled: false, updatedAt: archivedAt }, keys, webhook), archivedAt: archivedAt.toISOString() };
   });
 
   app.post('/api/admin/apps/:id/keys', async (request, reply) => {
