@@ -21,6 +21,31 @@ curl -X POST https://gateway.example.com/api/admin/apps \
 
 Seeded MVP apps are `erwin-music` and `erwin-hatchery`. Keep permissions least-privilege; every app API route checks the app's permissions.
 
+## Permission matrix
+
+Use this matrix when requesting permissions for a registered app. All app-facing `/api/v1/*` routes require a valid app API key; rows marked "app API key only" do not require an additional app permission today.
+
+| Gateway capability | Route or event | Required app permission | Notes |
+| --- | --- | --- | --- |
+| App identity smoke test | `GET /api/v1/me` | App API key only | Returns the authenticated app identity, enabled state, permissions, and key metadata. |
+| Send chat messages | `POST /api/v1/chat/messages` | `chat:messages:send` | Also requires an `idempotency_key` for every outgoing chat write. |
+| Chat message webhooks | `twitch.chat.message` | `chat:messages:receive` | Delivered to apps whose webhook filters match the event type. |
+| Chat command webhooks | `twitch.chat.message` | `chat:commands:receive` | Commands are delivered as `twitch.chat.message` events with `chat.is_command = true`; subscribe to `twitch.chat.message` until a distinct command event type is intentionally added. |
+| Channel Point reward read | `GET /api/v1/channel-points/rewards`, `GET /api/v1/channel-points/rewards/:rewardId`, reward sync/read helpers | `channel_points:rewards:read` | Read access includes listing and inspecting reward records. |
+| Channel Point reward create | `POST /api/v1/channel-points/rewards` | `channel_points:rewards:create` | Creates app-owned custom rewards through the gateway. |
+| Channel Point reward update | `PATCH /api/v1/channel-points/rewards/:rewardId` | `channel_points:rewards:update` | Only the owning app can mutate an app-owned reward. |
+| Channel Point reward delete | `DELETE /api/v1/channel-points/rewards/:rewardId` | `channel_points:rewards:delete` | Deletes or disables a manageable app-owned reward. |
+| Channel Point redemption read | `GET /api/v1/channel-points/redemptions`, Twitch redemption fetch helpers | `channel_points:redemptions:read` | Required to list or inspect redemptions. |
+| Channel Point redemption manage | `PATCH /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status` | `channel_points:redemptions:manage` | Required to fulfill or cancel redemptions after downstream processing. |
+| Channel Point webhook events | `twitch.channel_points.custom_reward_redemption.add`, `twitch.channel_points.custom_reward_redemption.update` | `channel_points:events:receive` | Used for Channel Point redemption event delivery. |
+| Stream status/profile/schedule | `GET /api/v1/channel/status`, `GET /api/v1/streams/current`, `GET /api/v1/channels`, `GET /api/v1/channels/:channelId/profile`, `GET /api/v1/channels/:channelId/schedule`; stream/profile webhooks | `streams:read` | Also gates `twitch.stream.online`, `twitch.stream.offline`, and `twitch.channel.update` webhook delivery. |
+| Subscriptions | `GET /api/v1/subscriptions`, subscription webhook events | `subscriptions:read` | Includes live subscription EventSub deliveries such as `twitch.channel.subscribe` and gift/message/end variants. |
+| Subscription backfill | `POST /api/v1/subscriptions/backfill` | `subscriptions:backfill` | Use for historical or repair backfill runs. |
+| Bits | `GET /api/v1/bits/leaderboard`, Bits webhook events | `bits:read` | Includes `twitch.channel.cheer` webhook delivery. |
+| Bits backfill | `POST /api/v1/bits/backfill` | `bits:backfill` | Use for Bits leaderboard repair/backfill runs. |
+| Webhook delivery inspection | `GET /api/v1/webhook-deliveries`, `GET /api/v1/webhook-deliveries/:deliveryId` | App API key only | Current app-facing routes are scoped to deliveries owned by the authenticated app and do not require a separate permission. If a dedicated delivery-inspection permission is added later, update this row. |
+| Webhook delivery retry | `POST /api/v1/webhook-deliveries/:deliveryId/retry` | App API key only | Current app-facing retry is scoped to deliveries owned by the authenticated app and does not require a separate permission. If a dedicated delivery-retry permission is added later, update this row. |
+
 ## 2. Generate an API key
 
 ```bash
