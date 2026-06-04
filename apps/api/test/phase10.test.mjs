@@ -173,6 +173,8 @@ test('webhook signing and retry/dead-letter behavior are implemented', () => {
   assert.match(source, /const maxAttempts = 5/, 'retry limit must be explicit');
   assert.doesNotMatch(source, /delivery_id: null/, 'stored delivery payloads must not contain a null delivery_id placeholder');
   assert.match(source, /delivery_id: row\.delivery\.id/, 'outbound webhook body must include the real delivery_id');
+  assert.match(source, /twitch\.channel_points\.redemption\.add/, 'legacy channel point redemption filters must remain compatible');
+  assert.match(source, /twitch\.channel_points\.custom_reward_redemption\.add/, 'legacy redemption filters must map to emitted custom reward redemption events');
 });
 
 test('app-facing webhook delivery routes are scoped to the authenticated app', () => {
