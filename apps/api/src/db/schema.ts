@@ -344,6 +344,7 @@ export const rewardSyncRuns = pgTable('reward_sync_runs', {
   rewardsCreated: integer('rewards_created').notNull().default(0),
   rewardsUpdated: integer('rewards_updated').notNull().default(0),
   rewardsMissingOwnership: integer('rewards_missing_ownership').notNull().default(0),
+  rewardsMissingOnTwitch: integer('rewards_missing_on_twitch').notNull().default(0),
   error: text('error'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   completedAt: timestamp('completed_at', { withTimezone: true })
