@@ -151,3 +151,294 @@ Common event types and filters:
 - `GET /api/v1/health/live` confirms the process is running.
 - `GET /api/v1/health/ready` confirms database/Twitch readiness.
 - `GET /api/v1/health/deep` includes scope, EventSub, queue, Channel Point, Bits/subscription, and dead-letter diagnostics.
+
+## 6. Downstream client implementation examples
+
+The examples below are intentionally app-side code, not gateway internals. They show the minimum patterns each downstream app should copy before it starts producing external effects.
+
+### 6.1 Authenticated gateway client with common error handling
+
+Use `Authorization: Bearer <app-api-key>` on every `/api/v1/*` request. Treat the API key as a secret and do not log it.
+
+```ts
+const gatewayBaseUrl = process.env.ERWIN_GATEWAY_URL ?? 'https://gateway.example.com';
+const appApiKey = process.env.ERWIN_GATEWAY_APP_API_KEY!;
+
+type GatewayErrorCode = 401 | 403 | 404 | 409 | 429 | 500 | 502 | 503 | 504;
+
+class GatewayError extends Error {
+  constructor(
+    public status: GatewayErrorCode,
+    message: string,
+    public responseBody: unknown,
+  ) {
+    super(message);
+  }
+}
+
+function gatewayErrorMessage(status: number) {
+  if (status === 401) return 'Gateway API key is missing, malformed, revoked, or invalid.';
+  if (status === 403) return 'Gateway API key is valid but the app lacks the required permission.';
+  if (status === 404) return 'Gateway resource was not found or does not belong to this app.';
+  if (status === 409) return 'Idempotency conflict: the same key was reused with different request parameters.';
+  if (status === 429) return 'Gateway or upstream Twitch rate limit reached; retry after the response delay if provided.';
+  if (status >= 500) return 'Gateway or upstream dependency is temporarily unavailable; retry with backoff.';
+  return `Gateway request failed with HTTP ${status}.`;
+}
+
+export async function gatewayFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(new URL(path, gatewayBaseUrl), {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${appApiKey}`,
+      Accept: 'application/json',
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init.headers,
+    },
+  });
+
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    throw new GatewayError(
+      response.status as GatewayErrorCode,
+      gatewayErrorMessage(response.status),
+      body,
+    );
+  }
+
+  return body as T;
+}
+```
+
+Recommended handling by status:
+
+| Status | App action |
+| --- | --- |
+| `401` | Stop startup or disable gateway features until the app API key is fixed. Do not retry with the same key in a hot loop. |
+| `403` | Treat as configuration drift. Request the missing permission for the registered app. |
+| `404` | Verify the app owns the requested reward, message, delivery, or redemption before retrying. |
+| `409` | Use the existing resource returned by the gateway if available; otherwise create a new stable idempotency key only for a genuinely new action. |
+| `429` | Back off, respect `Retry-After` if the gateway returns it, and keep the original idempotency key for retried writes. |
+| `5xx` | Retry with exponential backoff and jitter; preserve idempotency keys so retries do not duplicate Twitch side effects. |
+
+### 6.2 Send chat with a stable `idempotency_key`
+
+Build the key from a business identifier that stays the same across process restarts, queue retries, and deploys. Do not use a random UUID per retry.
+
+```ts
+type SendChatResponse = {
+  message: {
+    id: string;
+    status: 'queued' | 'sending' | 'sent' | 'retrying' | 'dead_lettered';
+    idempotencyKey: string;
+  };
+};
+
+export async function announceVoteRound(roundId: string, text: string) {
+  const idempotencyKey = `erwin-music:vote-round:${roundId}:announcement:v1`;
+
+  return gatewayFetch<SendChatResponse>('/api/v1/chat/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      message: text,
+      idempotency_key: idempotencyKey,
+      for_source_only: true,
+      priority: 0,
+      metadata: {
+        source: 'erwin-music',
+        round_id: roundId,
+      },
+    }),
+  });
+}
+```
+
+If the app times out after sending this request, retry the same payload with the same `idempotency_key`. The gateway returns the existing queued or sent message for exact duplicates and returns `409` when the same key is reused for different message parameters.
+
+### 6.3 Verify webhook signatures from the raw body
+
+The gateway signs the concatenation of `X-Erwin-Gateway-Delivery-Id`, `X-Erwin-Gateway-Timestamp`, and the exact raw request body using the app webhook signing secret. The receiver must verify the signature before parsing or trusting the payload.
+
+```ts
+import crypto from 'node:crypto';
+import express from 'express';
+
+const webhookSigningSecret = process.env.ERWIN_GATEWAY_WEBHOOK_SIGNING_SECRET!;
+const app = express();
+
+function timingSafeSignatureCheck(expected: string, received: string) {
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  const receivedBytes = Buffer.from(received ?? '', 'utf8');
+  return expectedBytes.length === receivedBytes.length
+    && crypto.timingSafeEqual(expectedBytes, receivedBytes);
+}
+
+function verifyErwinGatewayWebhook(headers: Record<string, string | string[] | undefined>, rawBody: Buffer) {
+  const deliveryId = String(headers['x-erwin-gateway-delivery-id'] ?? '');
+  const timestamp = String(headers['x-erwin-gateway-timestamp'] ?? '');
+  const signature = String(headers['x-erwin-gateway-signature'] ?? '');
+
+  const ageMs = Math.abs(Date.now() - Date.parse(timestamp));
+  if (!deliveryId || !timestamp || !signature || Number.isNaN(ageMs) || ageMs > 5 * 60_000) {
+    return false;
+  }
+
+  const expected = `sha256=${crypto
+    .createHmac('sha256', webhookSigningSecret)
+    .update(deliveryId)
+    .update(timestamp)
+    .update(rawBody)
+    .digest('hex')}`;
+
+  return timingSafeSignatureCheck(expected, signature);
+}
+
+app.post('/erwin-gateway/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!verifyErwinGatewayWebhook(req.headers, req.body)) {
+    return res.status(401).send('invalid signature');
+  }
+
+  const payload = JSON.parse(req.body.toString('utf8'));
+  await handleGatewayEvent(payload);
+  return res.status(204).send();
+});
+```
+
+Framework notes:
+
+- Configure the route to expose the raw request body as bytes. Do not verify against `JSON.stringify(req.body)` after a JSON parser has normalized whitespace or key order.
+- Use the `X-Erwin-Gateway-Delivery-Id` header for delivery-level dedupe and the payload `event_id` for event-level dedupe.
+- Reject stale `X-Erwin-Gateway-Timestamp` values, for example older than five minutes, to limit replay risk.
+
+### 6.4 Store webhook idempotency records before side effects
+
+Persist idempotency keys in your app database before granting inventory, posting chat, updating ledgers, or fulfilling/canceling redemptions. A single Twitch EventSub event can be delivered more than once, and one logical Twitch redemption can appear in both `add` and `update` flows.
+
+```sql
+CREATE TABLE erwin_gateway_processed_events (
+  delivery_id text PRIMARY KEY,
+  event_id text NOT NULL,
+  twitch_redemption_id text,
+  event_type text NOT NULL,
+  processed_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (event_id),
+  UNIQUE (twitch_redemption_id)
+);
+```
+
+```ts
+type GatewayWebhookPayload = {
+  delivery_id: string;
+  event_id: string;
+  type: string;
+  redemption?: { id: string; status: string; user_input?: string };
+  reward?: { gateway_reward_id?: string; id: string; title: string };
+};
+
+async function handleGatewayEvent(payload: GatewayWebhookPayload) {
+  const twitchRedemptionId = payload.redemption?.id ?? null;
+
+  const inserted = await db.processedEvents.insertIgnore({
+    deliveryId: payload.delivery_id,
+    eventId: payload.event_id,
+    twitchRedemptionId,
+    eventType: payload.type,
+  });
+
+  if (!inserted) {
+    return; // duplicate delivery_id, event_id, or Twitch redemption id: acknowledge without repeating side effects
+  }
+
+  if (payload.type === 'twitch.channel_points.custom_reward_redemption.add') {
+    await grantRewardAndSettleRedemption(payload);
+  }
+}
+```
+
+Choose uniqueness based on the external effect:
+
+- `delivery_id`: prevents repeating work for the same HTTP delivery retry.
+- `event_id`: prevents repeating work when the same gateway event is redelivered.
+- Twitch redemption id (`payload.redemption.id`): prevents granting the same Channel Point reward twice across `add`, `update`, manual retry, or app reprocessing paths.
+
+### 6.5 Fulfill or cancel Channel Point redemptions
+
+The gateway records redemptions but does not auto-fulfill or auto-cancel them. After your app durably completes or rejects its domain work, call the explicit status endpoint for the app-owned reward.
+
+Fulfill after successful domain work:
+
+```ts
+async function fulfillRedemption(rewardId: string, redemptionId: string, ledgerTransactionId: string) {
+  return gatewayFetch(`/api/v1/channel-points/rewards/${rewardId}/redemptions/${redemptionId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: 'FULFILLED',
+      reason: `Granted reward in ledger transaction ${ledgerTransactionId}`,
+    }),
+  });
+}
+```
+
+Cancel when the app cannot safely complete the reward:
+
+```ts
+async function cancelRedemption(rewardId: string, redemptionId: string, reason: string) {
+  return gatewayFetch(`/api/v1/channel-points/rewards/${rewardId}/redemptions/${redemptionId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: 'CANCELED',
+      reason: reason.slice(0, 500),
+    }),
+  });
+}
+```
+
+Typical redemption flow:
+
+1. Verify the webhook signature from the raw body.
+2. Insert `delivery_id`, `event_id`, and `redemption.id` into the app idempotency table.
+3. Run the app's domain transaction, such as granting an item, writing an economy ledger entry, or validating user input.
+4. Call `PATCH /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status` with `FULFILLED` only after the domain transaction commits.
+5. Call the same endpoint with `CANCELED` when validation fails or the app cannot complete the reward.
+6. Return `2xx` from the webhook only after the duplicate check and domain decision are durable.
+
+Required permissions:
+
+- `channel_points:redemptions:read` to list or inspect redemptions.
+- `channel_points:redemptions:manage` to fulfill or cancel redemptions.
+
+### 6.6 Inspect and retry webhook deliveries
+
+Downstream apps can inspect only their own deliveries through the app-facing `/api/v1/webhook-deliveries` endpoints.
+
+List recent failed or dead-lettered deliveries:
+
+```bash
+curl 'https://gateway.example.com/api/v1/webhook-deliveries?status=dead_lettered&limit=25' \
+  -H 'Authorization: Bearer <app-api-key>'
+```
+
+Inspect one delivery and its attempts:
+
+```bash
+curl 'https://gateway.example.com/api/v1/webhook-deliveries/<delivery-id>' \
+  -H 'Authorization: Bearer <app-api-key>'
+```
+
+Force a retry after fixing the receiver:
+
+```bash
+curl -X POST 'https://gateway.example.com/api/v1/webhook-deliveries/<delivery-id>/retry' \
+  -H 'Authorization: Bearer <app-api-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+Operational guidance:
+
+- Retry only after the app is ready to accept the event and its idempotency table is working.
+- Expect the same `event_id` and domain identifiers again when a delivery is retried.
+- Inspect delivery attempts for HTTP status, error text, and response excerpts before retrying repeatedly.
+- Use status filters such as `queued`, `retrying`, `delivered`, and `dead_lettered` when triaging incidents.
