@@ -64,6 +64,7 @@ type TextCommand = { id: string; channelId: string | null; command: string; alia
 type ChannelPointReward = { id: string; twitchRewardId: string; owningAppId: string | null; title: string; cost: number; enabled: boolean; manageable: boolean; deletedAt: string | null; lastSyncedAt: string | null; };
 type ChannelPointRedemption = { id: string; twitchRedemptionId: string; rewardId: string | null; twitchRewardId: string; userLogin: string | null; userDisplayName: string | null; status: string; userInput: string | null; redeemedAt: string; eventId: string | null; };
 type ChannelPointDiagnostics = { missingChannelManageRedemptions?: boolean; lastRewardSync?: unknown; lastRedemptionEvent?: unknown; rewardsMissingOnTwitch?: number; twitchRewardsMissingOwnershipMapping?: number; notes?: string[] };
+type ChannelPointRewardSyncRun = { rewardsSeen: number; rewardsCreated: number; rewardsUpdated: number; rewardsMissingOnTwitch: number; completedAt: string | null; };
 
 type OutgoingMessage = { id: string; sourceAppId: string; channelId: string; message: string; replyParentMessageId: string | null; priority: number; status: string; idempotencyKey: string; twitchMessageId: string | null; twitchIsSent: boolean | null; twitchDropReason: unknown; responseCode: number | null; responseBodyExcerpt: string | null; attempts: number; nextAttemptAt: string; lastError: string | null; createdAt: string; sentAt: string | null; failedAt: string | null; };
 
@@ -164,6 +165,7 @@ function App() {
   const [showDeletedChannelPointRewards, setShowDeletedChannelPointRewards] = useState(false);
   const [channelPointRedemptions, setChannelPointRedemptions] = useState<ChannelPointRedemption[]>([]);
   const [channelPointDiagnostics, setChannelPointDiagnostics] = useState<ChannelPointDiagnostics | null>(null);
+  const [channelPointRewardSyncRun, setChannelPointRewardSyncRun] = useState<ChannelPointRewardSyncRun | null>(null);
   const [rewardForm, setRewardForm] = useState({ title: '', cost: '', prompt: '', owning_app_id: '', is_enabled: true });
   const [commandForm, setCommandForm] = useState({ command: '', aliases: '', responseText: '', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
   const [twitchLoading, setTwitchLoading] = useState(false);
@@ -301,7 +303,10 @@ function App() {
   async function syncChannelPoints() {
     const response = await fetch('/api/admin/channel-points/rewards/sync', { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
     if (!response.ok) throw new Error(`Channel Points sync failed with ${response.status}`);
-    await loadChannelPoints();
+    const payload = await response.json();
+    setChannelPointRewardSyncRun(payload.run ?? null);
+    setShowDeletedChannelPointRewards(false);
+    await loadChannelPoints(false);
   }
 
   async function createChannelPointReward() {
@@ -986,6 +991,14 @@ function App() {
               <label className="checkbox-label"><input type="checkbox" checked={showDeletedChannelPointRewards} onChange={(event) => { const checked = event.target.checked; setShowDeletedChannelPointRewards(checked); void loadChannelPoints(checked).catch((loadError) => setError(String(loadError))); }} /> Show deleted/local stale rewards</label>
             </div>
           </div>
+
+          {channelPointRewardSyncRun ? (
+            <div className="sync-summary" role="status">
+              <strong>Last reward sync:</strong> saw {channelPointRewardSyncRun.rewardsSeen} rewards, created {channelPointRewardSyncRun.rewardsCreated}, updated {channelPointRewardSyncRun.rewardsUpdated}
+              {channelPointRewardSyncRun.completedAt ? ` · completed ${new Date(channelPointRewardSyncRun.completedAt).toLocaleString()}` : ''}.
+              {channelPointRewardSyncRun.rewardsMissingOnTwitch > 0 ? ` ${channelPointRewardSyncRun.rewardsMissingOnTwitch} local rewards were marked deleted because Twitch no longer returned them.` : ''}
+            </div>
+          ) : null}
 
           <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void createChannelPointReward().catch((createError) => setError(String(createError))); }}>
             <label>Title<input required value={rewardForm.title} onChange={(event) => setRewardForm({ ...rewardForm, title: event.target.value })} placeholder="Example: hatchery-reward" /></label>
