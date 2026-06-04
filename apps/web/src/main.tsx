@@ -180,7 +180,6 @@ function App() {
     name: '',
     slug: '',
     description: '',
-    permissions: '',
     webhookUrl: '',
     webhookEventFilters: ''
   });
@@ -488,7 +487,7 @@ function App() {
         name: form.name.trim(),
         slug: form.slug.trim(),
         description: form.description.trim(),
-        permissions: splitCsv(form.permissions),
+        permissions: [],
         webhookUrl: form.webhookUrl.trim(),
         webhookEventFilters: splitCsv(form.webhookEventFilters)
       })
@@ -748,7 +747,7 @@ function App() {
             <label>Name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Example: Erwin Hatchery" /></label>
             <label>Slug<input required value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="Example: erwin-hatchery" /></label>
             <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Example: Hatchery reward integration" /></label>
-            <label>Permissions<input value={form.permissions} onChange={(event) => setForm({ ...form, permissions: event.target.value })} placeholder="Example: chat:messages:send,streams:read" /></label>
+            <p className="form-help">Create the app first, then assign permissions with the Edit controls.</p>
             <label>Webhook URL placeholder<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="Example: https://app.example/webhooks/erwin" /></label>
             <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: chat.message,channel_points.redemption" /></label>
             <button type="submit">Create app</button>
@@ -809,7 +808,11 @@ function App() {
                     </div>
                   ) : (
                     <>
-                      <div className="chips">{registeredApp.permissions.map((permission) => <span key={permission}>{permission}</span>)}</div>
+                      {registeredApp.permissions.length > 0 ? (
+                        <div className="chips">{registeredApp.permissions.map((permission) => <span key={permission}>{permission}</span>)}</div>
+                      ) : (
+                        <p className="empty-state">No permissions yet. Use Edit to assign permissions.</p>
+                      )}
 
                       <div className="webhook-summary">
                         <p><strong>Webhook URL placeholder:</strong> {registeredApp.webhook.url || 'Not configured'}</p>
