@@ -8,14 +8,14 @@
 | --- | --- | --- | --- |
 | IRC receive socket | Signed webhook `twitch.chat.message` | `chat:messages:receive` | EventSub `channel.chat.message`, bot `user:read:chat`/`user:bot`, broadcaster `channel:bot` |
 | IRC `PRIVMSG` send | `POST /api/v1/chat/messages` | `chat:messages:send` | bot `user:write:chat`/`user:bot`, broadcaster `channel:bot` |
-| `!vote`, `!song`, `!skip`, `!pause`, `!resume` command intake | Signed webhook `twitch.chat.command` parsed from chat | `chat:commands:receive` | same as chat receive |
+| `!vote`, `!song`, `!skip`, `!pause`, `!resume` command intake | Signed webhook `twitch.chat.message` with `chat.is_command = true` and parsed command fields | `chat:commands:receive` | same as chat receive |
 | Simple text commands such as `!dc` | Gateway Text Commands admin UI + outgoing chat queue | gateway internal | same as chat send |
 | Stream status polling | `GET /api/v1/streams/current` and stream online/offline webhooks | `streams:read` | Twitch stream APIs/EventSub |
 | Bot OAuth refresh | Gateway Twitch Setup + encrypted refresh worker | none in app | bot OAuth |
 
 ## IRC receive replacement
 
-Subscribe `erwin-music` webhook filters to `twitch.chat.message` and optionally `twitch.chat.command`.
+Subscribe `erwin-music` webhook filters to `twitch.chat.message`. Command messages currently arrive as `twitch.chat.message` events with `chat.is_command = true`; only subscribe to a separate `twitch.chat.command` event if the gateway intentionally adds that event type later.
 
 Webhook payload includes:
 
@@ -68,7 +68,7 @@ Move static response commands into the gateway Text Commands UI when they do not
 - `!commands`
 - `!lurk`
 
-Configure response text, aliases, role requirement, reply mode, global cooldown, and per-user cooldown. Cooldown hits are recorded and do not spam chat. Command messages can still fan out to `erwin-music` if the app subscribes to command webhooks.
+Configure response text, aliases, role requirement, reply mode, global cooldown, and per-user cooldown. Cooldown hits are recorded and do not spam chat. Command messages can still fan out to `erwin-music` through `twitch.chat.message` webhooks where `chat.is_command = true`.
 
 ## Stream status polling replacement
 

@@ -13,7 +13,7 @@ Replace:
 With:
 
 - gateway `twitch.chat.message` webhook
-- gateway `twitch.chat.command` webhook or parsed command fields
+- gateway `twitch.chat.message` webhook with `chat.is_command = true` and parsed command fields
 - gateway `POST /api/v1/chat/messages`
 - gateway `GET /api/v1/channel/status`
 - gateway Text Commands UI for simple commands like `!dc`
@@ -30,7 +30,7 @@ Keep in erwin-music:
 
 ### erwin-music commands
 
-The gateway must deliver chat/command webhooks for:
+The gateway currently delivers commands as `twitch.chat.message` webhooks with `chat.is_command = true` for:
 
 ```text
 !vote
@@ -40,7 +40,7 @@ The gateway must deliver chat/command webhooks for:
 !resume
 ```
 
-erwin-music handles the domain behavior.
+erwin-music handles the domain behavior. Add or subscribe to a separate `twitch.chat.command` event only if the gateway intentionally emits that event type later.
 
 ### erwin-music simple text commands
 

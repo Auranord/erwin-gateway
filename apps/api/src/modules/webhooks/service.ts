@@ -86,7 +86,22 @@ export async function normalizeChatMessageEvent(db: Database, params: { rawMessa
   return eventRow;
 }
 
-function matchesFilters(filters: string[], type: string) { return filters.length === 0 || filters.includes(type) || filters.includes('twitch.*') || filters.includes('*'); }
+const eventFilterAliases: Record<string, string> = {
+  'twitch.channel_points.redemption.add': 'twitch.channel_points.custom_reward_redemption.add',
+  'twitch.channel_points.redemption.update': 'twitch.channel_points.custom_reward_redemption.update'
+};
+
+function normalizeEventFilter(filter: string) {
+  return eventFilterAliases[filter] ?? filter;
+}
+
+function matchesFilters(filters: string[], type: string) {
+  if (filters.length === 0) return true;
+  return filters.some((filter) => {
+    const normalizedFilter = normalizeEventFilter(filter);
+    return normalizedFilter === type || normalizedFilter === 'twitch.*' || normalizedFilter === '*';
+  });
+}
 function appCanReceive(app: typeof apps.$inferSelect, type: string, payload: any) {
   if (type === 'twitch.chat.message') return payload?.chat?.is_command ? app.permissions.includes('chat:commands:receive') : app.permissions.includes('chat:messages:receive');
   if (type === 'twitch.channel_points.custom_reward_redemption.add' || type === 'twitch.channel_points.custom_reward_redemption.update') return app.permissions.includes('channel_points:events:receive') || app.permissions.includes('events:receive_twitch_events');

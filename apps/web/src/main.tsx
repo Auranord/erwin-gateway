@@ -749,7 +749,7 @@ function App() {
             <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Example: Hatchery reward integration" /></label>
             <p className="form-help">Create the app first, then assign permissions with the Edit controls.</p>
             <label>Webhook URL placeholder<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="Example: https://app.example/webhooks/erwin" /></label>
-            <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: chat.message,channel_points.redemption" /></label>
+            <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
             <button type="submit">Create app</button>
           </form>
 
@@ -793,7 +793,7 @@ function App() {
                         <label>Slug<input value={editForm.slug} onChange={(event) => updateAppEditField(registeredApp.id, 'slug', event.target.value)} /></label>
                         <label>Description<input value={editForm.description} onChange={(event) => updateAppEditField(registeredApp.id, 'description', event.target.value)} /></label>
                         <label>Webhook URL placeholder<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="Example: https://app.example/webhooks/erwin" /></label>
-                        <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="Example: chat.message,channel_points.redemption" /></label>
+                        <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
                       </div>
                       <fieldset className="permission-picker">
                         <legend>Permissions</legend>

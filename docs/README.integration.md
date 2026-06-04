@@ -15,7 +15,7 @@ curl -X POST https://gateway.example.com/api/admin/apps \
     "slug": "example-app",
     "permissions": ["chat:messages:send", "chat:messages:receive"],
     "webhookUrl": "https://example.internal/erwin-gateway/webhook",
-    "webhookEventFilters": ["twitch.chat.message", "twitch.chat.command"]
+    "webhookEventFilters": ["twitch.chat.message", "twitch.channel_points.custom_reward_redemption.add"]
   }'
 ```
 
@@ -117,12 +117,13 @@ Important receiver rules:
 - Store `X-Erwin-Gateway-Delivery-Id` or payload `event_id` to make your handler idempotent.
 - Return any `2xx` response only after the app has durably recorded the event or safely detected a duplicate.
 
-Common event types:
+Common event types and filters:
 
 - `twitch.chat.message`
-- `twitch.chat.command`
-- `twitch.channel_points.redemption.add`
-- `twitch.channel_points.redemption.update`
+- `twitch.channel_points.custom_reward_redemption.add`
+- `twitch.channel_points.custom_reward_redemption.update`
+- `twitch.*` for all Twitch events
+- `*` for all deliverable events
 - `twitch.channel.subscribe`
 - `twitch.channel.subscription.gift`
 - `twitch.channel.cheer`

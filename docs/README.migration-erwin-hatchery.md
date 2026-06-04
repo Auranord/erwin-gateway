@@ -7,7 +7,7 @@
 | Old Hatchery behavior | New gateway behavior | App permission | Required Twitch scopes |
 | --- | --- | --- | --- |
 | Channel Point reward management | `/api/v1/channel-points/rewards` | reward read/create/update/delete permissions | broadcaster `channel:manage:redemptions` |
-| Redemption events | signed webhooks `twitch.channel_points.redemption.add/update` | `channel_points:events:receive` | broadcaster `channel:read:redemptions`, `channel:manage:redemptions` |
+| Redemption events | signed webhooks `twitch.channel_points.custom_reward_redemption.add/update` | `channel_points:events:receive` | broadcaster `channel:read:redemptions`, `channel:manage:redemptions` |
 | Redemption fulfill/cancel | `/api/v1/channel-points/redemptions/:id/status` | `channel_points:redemptions:manage` | broadcaster `channel:manage:redemptions` |
 | EventSub subscriptions | gateway EventSub reconciliation | none in app | scopes by event type |
 | Subscription events/backfill | subscription webhooks + `/api/v1/subscriptions/backfill` | `subscriptions:read`, `subscriptions:backfill` | broadcaster `channel:read:subscriptions` |
@@ -39,8 +39,8 @@ Rewards found on Twitch without ownership mapping are reported in diagnostics an
 
 Subscribe Hatchery webhook filters to:
 
-- `twitch.channel_points.redemption.add`
-- `twitch.channel_points.redemption.update`
+- `twitch.channel_points.custom_reward_redemption.add`
+- `twitch.channel_points.custom_reward_redemption.update`
 
 Webhook receivers must verify signatures and dedupe by Twitch redemption ID or gateway event ID. Duplicate Twitch EventSub deliveries do not double-grant because the gateway upserts redemptions by Twitch redemption ID.
 
