@@ -13,10 +13,18 @@ function has(app: AppIdentity, permission: string) { return app.permissions.incl
 function requirePermission(app: AppIdentity, permission: string) { if (!has(app, permission)) return { ok: false as const, statusCode: 403, error: `App is missing ${permission} permission` }; return null; }
 function isoDate(value: unknown) { const date = typeof value === 'string' ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? new Date() : date; }
 function rewardLimits(raw: any) { return { max_per_stream: raw.max_per_stream_setting ?? null, max_per_user_per_stream: raw.max_per_user_per_stream_setting ?? null, global_cooldown: raw.global_cooldown_setting ?? null }; }
-function normalizeReward(raw: any, channelId: string, ownerAppId?: string | null) {
+type RewardRow = typeof twitchChannelPointRewards.$inferSelect;
+type NormalizeRewardOptions = { createResponse?: boolean; existingReward?: RewardRow | null };
+function normalizeReward(raw: any, channelId: string, ownerAppId?: string | null, options: NormalizeRewardOptions = {}) {
+  const manageable = typeof raw.is_manageable === 'boolean'
+    ? raw.is_manageable
+    : options.createResponse
+      ? true
+      : options.existingReward?.manageable === true && options.existingReward.owningAppId !== null;
+
   return {
     twitchRewardId: String(raw.id), channelId, owningAppId: ownerAppId ?? null, title: String(raw.title ?? ''), cost: Number(raw.cost ?? 0), prompt: raw.prompt ?? null,
-    enabled: Boolean(raw.is_enabled ?? raw.enabled ?? true), manageable: Boolean(raw.should_redemptions_skip_request_queue !== undefined ? true : raw.is_manageable ?? false),
+    enabled: Boolean(raw.is_enabled ?? raw.enabled ?? true), manageable,
     backgroundColor: raw.background_color ?? null, isUserInputRequired: Boolean(raw.is_user_input_required ?? false), limits: rewardLimits(raw), rawPayload: raw, lastSyncedAt: new Date(), deletedAt: null
   };
 }
@@ -40,9 +48,10 @@ async function twitchFetch(db: Database, config: AppConfig, url: URL, init: Requ
   if (!response.ok) throw new Error(`Twitch API ${url.pathname} failed with ${response.status}: ${text.slice(0, 500)}`);
   return body;
 }
-async function upsertReward(db: Database, raw: any, channelId: string, ownerAppId?: string | null) {
-  const values = normalizeReward(raw, channelId, ownerAppId);
-  const [existing] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.twitchRewardId, values.twitchRewardId)).limit(1);
+async function upsertReward(db: Database, raw: any, channelId: string, ownerAppId?: string | null, options: Omit<NormalizeRewardOptions, 'existingReward'> = {}) {
+  const twitchRewardId = String(raw.id);
+  const [existing] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.twitchRewardId, twitchRewardId)).limit(1);
+  const values = normalizeReward(raw, channelId, ownerAppId, { ...options, existingReward: existing ?? null });
   const [reward] = existing
     ? await db.update(twitchChannelPointRewards).set({ ...values, owningAppId: existing.owningAppId ?? values.owningAppId, updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, existing.id)).returning()
     : await db.insert(twitchChannelPointRewards).values(values).returning();
@@ -60,7 +69,7 @@ export async function createReward(db: Database, config: AppConfig, app: AppIden
   const cleaned = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));
   const response = await twitchFetch(db, config, url, { method: 'POST', body: JSON.stringify(cleaned) });
   const raw = response.data?.[0]; if (!raw) throw new Error('Twitch did not return created reward');
-  const { reward } = await upsertReward(db, raw, channel.id, app.id);
+  const { reward } = await upsertReward(db, raw, channel.id, app.id, { createResponse: true });
   return { ok: true as const, statusCode: 201, reward };
 }
 export async function getReward(db: Database, app: AppIdentity, rewardId: string) {
