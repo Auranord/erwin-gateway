@@ -37,7 +37,6 @@ type UpsertInput = {
   channelId?: string | null;
   command: string;
   aliases?: string[];
-  prefix?: string;
   responseText: string;
   enabled?: boolean;
   requiredRole?: TextCommandRole;
@@ -46,26 +45,25 @@ type UpsertInput = {
   replyMode?: TextCommandReplyMode;
 };
 
-function normalizeName(value: string, prefix = '!') {
+function normalizeName(value: string, commandPrefix = '!') {
   const trimmed = value.trim().toLowerCase();
-  return trimmed.startsWith(prefix) ? trimmed.slice(prefix.length).trim() : trimmed;
+  return trimmed.startsWith(commandPrefix) ? trimmed.slice(commandPrefix.length).trim() : trimmed;
 }
 
-function normalizePrefix(value?: string) {
+function normalizeCommandPrefix(value?: string | null) {
   const prefix = (value ?? '!').trim();
   return prefix || '!';
 }
 
-function normalizeAliases(aliases: string[] | undefined, prefix: string, command: string) {
-  return [...new Set((aliases ?? []).map((alias) => normalizeName(alias, prefix)).filter((alias) => alias && alias !== command))];
+function normalizeAliases(aliases: string[] | undefined, commandPrefix: string, command: string) {
+  return [...new Set((aliases ?? []).map((alias) => normalizeName(alias, commandPrefix)).filter((alias) => alias && alias !== command))];
 }
 
-export function validateTextCommandInput(input: { command?: string; aliases?: string[]; prefix?: string; responseText?: string; requiredRole?: string; replyMode?: string; cooldownSeconds?: number; userCooldownSeconds?: number }) {
-  const prefix = normalizePrefix(input.prefix);
-  const command = input.command ? normalizeName(input.command, prefix) : '';
+export function validateTextCommandInput(input: { command?: string; aliases?: string[]; commandPrefix?: string | null; responseText?: string; requiredRole?: string; replyMode?: string; cooldownSeconds?: number; userCooldownSeconds?: number }) {
+  const commandPrefix = normalizeCommandPrefix(input.commandPrefix);
+  const command = input.command ? normalizeName(input.command, commandPrefix) : '';
   const issues: string[] = [];
   if (!command || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(command)) issues.push('command must be 1-64 characters and contain only letters, numbers, underscores, or dashes');
-  if (prefix.length > 8) issues.push('prefix must be 1-8 characters');
   if (input.responseText === undefined || !input.responseText.trim()) issues.push('responseText is required');
   if (input.responseText && input.responseText.length > 500) issues.push('responseText must be 500 characters or fewer');
   if (input.requiredRole && !(textCommandRoles as readonly string[]).includes(input.requiredRole)) issues.push('requiredRole is invalid');
@@ -74,9 +72,9 @@ export function validateTextCommandInput(input: { command?: string; aliases?: st
     const value = input[field];
     if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > 86_400)) issues.push(`${field} must be an integer from 0 to 86400`);
   }
-  const aliases = normalizeAliases(input.aliases, prefix, command);
+  const aliases = normalizeAliases(input.aliases, commandPrefix, command);
   if (aliases.some((alias) => !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(alias))) issues.push('aliases must contain only letters, numbers, underscores, or dashes');
-  return { issues, normalized: { prefix, command, aliases } };
+  return { issues, normalized: { command, aliases } };
 }
 
 function serializeCommand(row: TextCommand) {
@@ -85,7 +83,6 @@ function serializeCommand(row: TextCommand) {
     channelId: row.channelId,
     command: row.command,
     aliases: row.aliases,
-    prefix: row.prefix,
     responseText: row.responseText,
     enabled: row.enabled,
     requiredRole: row.requiredRole,
@@ -101,7 +98,7 @@ function serializeCommand(row: TextCommand) {
 }
 
 export async function listTextCommands(db: Database) {
-  const rows = await db.select().from(textCommands).where(isNull(textCommands.archivedAt)).orderBy(textCommands.prefix, textCommands.command);
+  const rows = await db.select().from(textCommands).where(isNull(textCommands.archivedAt)).orderBy(textCommands.command);
   return rows.map(serializeCommand);
 }
 
@@ -117,7 +114,6 @@ export async function createTextCommand(db: Database, input: UpsertInput) {
     channelId: input.channelId ?? null,
     command: normalized.command,
     aliases: normalized.aliases,
-    prefix: normalized.prefix,
     responseText: input.responseText.trim(),
     enabled: input.enabled ?? true,
     requiredRole: input.requiredRole ?? 'everyone',
@@ -131,14 +127,13 @@ export async function createTextCommand(db: Database, input: UpsertInput) {
 export async function updateTextCommand(db: Database, id: string, input: Partial<UpsertInput>) {
   const [existing] = await db.select().from(textCommands).where(and(eq(textCommands.id, id), isNull(textCommands.archivedAt))).limit(1);
   if (!existing) return { ok: false as const, statusCode: 404, error: 'Text command not found' };
-  const merged = { ...existing, ...input, responseText: input.responseText ?? existing.responseText, command: input.command ?? existing.command, aliases: input.aliases ?? existing.aliases, prefix: input.prefix ?? existing.prefix };
+  const merged = { ...existing, ...input, responseText: input.responseText ?? existing.responseText, command: input.command ?? existing.command, aliases: input.aliases ?? existing.aliases };
   const { issues, normalized } = validateTextCommandInput(merged);
   if (issues.length) return { ok: false as const, statusCode: 400, error: 'Invalid text command', issues };
   const [row] = await db.update(textCommands).set({
     channelId: input.channelId === undefined ? existing.channelId : input.channelId,
     command: normalized.command,
     aliases: normalized.aliases,
-    prefix: normalized.prefix,
     responseText: (input.responseText ?? existing.responseText).trim(),
     enabled: input.enabled ?? existing.enabled,
     requiredRole: input.requiredRole ?? existing.requiredRole,
@@ -162,16 +157,22 @@ async function gatewayApp(db: Database) {
   return created!;
 }
 
+async function commandPrefixForChannel(db: Database, channelId: string | null) {
+  const [channel] = channelId
+    ? await db.select({ commandPrefix: twitchChannels.commandPrefix }).from(twitchChannels).where(eq(twitchChannels.id, channelId)).limit(1)
+    : await db.select({ commandPrefix: twitchChannels.commandPrefix }).from(twitchChannels).where(eq(twitchChannels.primaryChannel, true)).limit(1);
+  return normalizeCommandPrefix(channel?.commandPrefix);
+}
+
 async function findMatchingCommand(db: Database, input: ExecuteInput) {
   const rows = await db.select().from(textCommands).where(and(isNull(textCommands.archivedAt), input.channelId ? or(eq(textCommands.channelId, input.channelId), isNull(textCommands.channelId)) : isNull(textCommands.channelId)));
   const text = input.text.trim();
+  const commandPrefix = await commandPrefixForChannel(db, input.channelId);
+  if (!text.startsWith(commandPrefix) || text.length <= commandPrefix.length) return null;
+  const [name = ''] = text.slice(commandPrefix.length).trim().split(/\s+/);
+  const normalized = name.toLowerCase();
   const ordered = rows.sort((left, right) => Number(right.channelId === input.channelId) - Number(left.channelId === input.channelId));
-  return ordered.find((row) => {
-    if (!text.startsWith(row.prefix) || text.length <= row.prefix.length) return false;
-    const [name = ''] = text.slice(row.prefix.length).trim().split(/\s+/);
-    const normalized = name.toLowerCase();
-    return normalized === row.command || row.aliases.map((alias) => alias.toLowerCase()).includes(normalized);
-  }) ?? null;
+  return ordered.find((row) => normalized === row.command || row.aliases.map((alias) => alias.toLowerCase()).includes(normalized)) ?? null;
 }
 
 function hasRole(command: TextCommand, actor: ChatActor) {
@@ -285,7 +286,7 @@ export async function testTextCommand(db: Database, id: string, input: { user?: 
   const result = await executeTextCommandForChat(db, {
     channelId: channel.id,
     twitchMessageId: `admin-test-${crypto.randomUUID()}`,
-    text: `${command.prefix}${command.command}`,
+    text: `${channel.commandPrefix}${command.command}`,
     actor: { userId: 'admin-test', userLogin: input.user ?? 'admin', displayName: input.displayName ?? 'Admin', isBroadcaster: true, isMod: true, isVip: true, isSubscriber: true },
     channelLogin: input.channel ?? channel.login,
     channelDisplayName: input.channel ?? channel.displayName ?? channel.login,
