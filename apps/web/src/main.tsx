@@ -149,6 +149,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newRawKey, setNewRawKey] = useState<string | null>(null);
+  const [newWebhookSigningSecret, setNewWebhookSigningSecret] = useState<string | null>(null);
   const [twitchStatus, setTwitchStatus] = useState<TwitchSetupStatus | null>(null);
   const [eventSubStatus, setEventSubStatus] = useState<EventSubStatus | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -464,7 +465,7 @@ function App() {
     const response = await fetch(`/api/admin/apps/${appId}/webhook-secret`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
     if (!response.ok) throw new Error(`Webhook secret rotation failed with ${response.status}`);
     const payload = await response.json();
-    window.alert(`Copy this webhook signing secret now; it will not be shown again:\n\n${payload.rawSecret}`);
+    setNewWebhookSigningSecret(payload.rawSecret);
     await loadApps();
   }
 
@@ -740,6 +741,16 @@ function App() {
               <strong>Copy this raw API key now. It is shown only once.</strong>
               <code>{newRawKey}</code>
               <button onClick={() => setNewRawKey(null)}>I copied it</button>
+            </div>
+          ) : null}
+          {newWebhookSigningSecret ? (
+            <div className="one-time-key" role="alert">
+              <strong>Copy this webhook signing secret now. It is shown only once.</strong>
+              <textarea readOnly aria-label="New webhook signing secret" value={newWebhookSigningSecret} onFocus={(event) => event.currentTarget.select()} />
+              <div className="button-row">
+                <button type="button" onClick={() => void navigator.clipboard.writeText(newWebhookSigningSecret).catch((copyError) => setError(`Copy signing secret failed: ${String(copyError)}`))}>Copy signing secret</button>
+                <button type="button" onClick={() => setNewWebhookSigningSecret(null)}>I copied it</button>
+              </div>
             </div>
           ) : null}
 
