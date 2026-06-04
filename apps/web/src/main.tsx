@@ -155,6 +155,8 @@ function App() {
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [outgoingMessages, setOutgoingMessages] = useState<OutgoingMessage[]>([]);
   const [outgoingStatus, setOutgoingStatus] = useState('');
+  const [outgoingLimit, setOutgoingLimit] = useState(100);
+  const [outgoingLoaded, setOutgoingLoaded] = useState(false);
   const [textCommands, setTextCommands] = useState<TextCommand[]>([]);
   const [configuredPrefix, setConfiguredPrefix] = useState('!');
   const [prefixForm, setPrefixForm] = useState('!');
@@ -226,7 +228,6 @@ function App() {
     void loadApps();
     void loadTwitchStatus();
     void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
-    void loadOutgoingMessages().catch((loadError) => setError(String(loadError)));
     void loadTextCommands().catch((loadError) => setError(String(loadError)));
     void loadCommandPrefix().catch((loadError) => setError(String(loadError)));
     void loadChannelPoints().catch((loadError) => setError(String(loadError)));
@@ -335,13 +336,16 @@ function App() {
     await loadChannelPoints();
   }
 
-  async function loadOutgoingMessages(status = outgoingStatus) {
-    const params = new URLSearchParams({ limit: '100' });
+  async function loadOutgoingMessages(status = outgoingStatus, limit = outgoingLimit) {
+    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 100;
+    setOutgoingLimit(normalizedLimit);
+    const params = new URLSearchParams({ limit: String(normalizedLimit) });
     if (status) params.set('status', status);
     const response = await fetch(`/api/admin/outgoing-chat/messages?${params}`, { headers: adminHeaders() });
     if (!response.ok) throw new Error(`Outgoing messages API returned ${response.status}`);
     const payload = await response.json();
     setOutgoingMessages(payload.messages ?? []);
+    setOutgoingLoaded(true);
   }
 
   async function retryWebhookDelivery(deliveryId: string) {
@@ -353,7 +357,7 @@ function App() {
   async function retryOutgoingMessage(messageId: string) {
     const response = await fetch(`/api/admin/outgoing-chat/messages/${messageId}/retry`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
     if (!response.ok) throw new Error(`Retry outgoing message failed with ${response.status}`);
-    await loadOutgoingMessages();
+    if (outgoingLoaded) await loadOutgoingMessages();
   }
 
   async function createTextCommand() {
@@ -908,13 +912,18 @@ function App() {
               <p className="eyebrow">Gateway-owned send queue</p>
               <h2>Outgoing Messages</h2>
             </div>
-            <div className="button-row">
-              <select value={outgoingStatus} onChange={(event) => { setOutgoingStatus(event.target.value); void loadOutgoingMessages(event.target.value).catch((loadError) => setError(String(loadError))); }}>
-                <option value="">All statuses</option>
-                {['queued', 'sending', 'sent', 'dropped', 'failed', 'retrying', 'dead_lettered'].map((status) => <option key={status} value={status}>{status}</option>)}
-              </select>
-              <button onClick={() => void loadOutgoingMessages().catch((loadError) => setError(String(loadError)))}>Refresh messages</button>
-            </div>
+            <form className="button-row" onSubmit={(event) => { event.preventDefault(); void loadOutgoingMessages(outgoingStatus, outgoingLimit).catch((loadError) => setError(String(loadError))); }}>
+              <label>Status
+                <select value={outgoingStatus} onChange={(event) => setOutgoingStatus(event.target.value)}>
+                  <option value="">All statuses</option>
+                  {['queued', 'sending', 'sent', 'dropped', 'failed', 'retrying', 'dead_lettered'].map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </label>
+              <label>Limit
+                <input type="number" min="1" max="500" value={outgoingLimit} onChange={(event) => setOutgoingLimit(Number.isNaN(event.target.valueAsNumber) ? 1 : event.target.valueAsNumber)} />
+              </label>
+              <button type="submit">Load messages</button>
+            </form>
           </div>
           <div className="table-list">
             {outgoingMessages.map((message) => (
@@ -934,7 +943,7 @@ function App() {
                 {!['sent', 'dropped'].includes(message.status) ? <button onClick={() => void retryOutgoingMessage(message.id).catch((retryError) => setError(String(retryError)))}>Retry safely</button> : null}
               </article>
             ))}
-            {outgoingMessages.length === 0 ? <p>No outgoing messages match the current filter.</p> : null}
+            {outgoingMessages.length === 0 ? <p>{outgoingLoaded ? 'No outgoing messages match the current filters.' : 'Choose filters and load outgoing messages.'}</p> : null}
           </div>
         </section>
 
