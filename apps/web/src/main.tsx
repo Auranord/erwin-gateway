@@ -129,6 +129,8 @@ function App() {
   const [eventSubStatus, setEventSubStatus] = useState<EventSubStatus | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatSearch, setChatSearch] = useState('');
+  const [chatLimit, setChatLimit] = useState(50);
+  const [chatLogLoaded, setChatLogLoaded] = useState(false);
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
   const [outgoingMessages, setOutgoingMessages] = useState<OutgoingMessage[]>([]);
   const [outgoingStatus, setOutgoingStatus] = useState('');
@@ -198,20 +200,22 @@ function App() {
   useEffect(() => {
     void loadApps();
     void loadTwitchStatus();
-    void loadChatLog().catch((loadError) => setError(String(loadError)));
     void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
     void loadOutgoingMessages().catch((loadError) => setError(String(loadError)));
     void loadTextCommands().catch((loadError) => setError(String(loadError)));
     void loadChannelPoints().catch((loadError) => setError(String(loadError)));
   }, []);
 
-  async function loadChatLog(search = chatSearch) {
-    const params = new URLSearchParams({ limit: '100' });
+  async function loadChatLog(search = chatSearch, limit = chatLimit) {
+    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 50;
+    setChatLimit(normalizedLimit);
+    const params = new URLSearchParams({ limit: String(normalizedLimit) });
     if (search) params.set('q', search);
     const response = await fetch(`/api/admin/chat/log?${params}`, { headers: adminHeaders() });
     if (!response.ok) throw new Error(`Chat log API returned ${response.status}`);
     const payload = await response.json();
     setChatMessages(payload.messages ?? []);
+    setChatLogLoaded(true);
   }
 
   async function loadWebhookDeliveries() {
@@ -692,10 +696,15 @@ function App() {
               <p className="eyebrow">Chat archive</p>
               <h2>Chat Log</h2>
             </div>
-            <div className="button-row">
-              <input placeholder="Search chat text" value={chatSearch} onChange={(event) => setChatSearch(event.target.value)} />
-              <button onClick={() => void loadChatLog().catch((loadError) => setError(String(loadError)))}>Search</button>
-            </div>
+            <form className="button-row" onSubmit={(event) => { event.preventDefault(); void loadChatLog(chatSearch, chatLimit).catch((loadError) => setError(String(loadError))); }}>
+              <label>Search text
+                <input placeholder="Optional chat text" value={chatSearch} onChange={(event) => setChatSearch(event.target.value)} />
+              </label>
+              <label>Limit
+                <input type="number" min="1" max="500" value={chatLimit} onChange={(event) => setChatLimit(Number.isNaN(event.target.valueAsNumber) ? 1 : event.target.valueAsNumber)} />
+              </label>
+              <button type="submit">Load messages</button>
+            </form>
           </div>
           <div className="table-list">
             {chatMessages.map((message) => (
@@ -711,7 +720,7 @@ function App() {
                 </div>
               </article>
             ))}
-            {chatMessages.length === 0 ? <p>No chat messages match the current search.</p> : null}
+            {chatMessages.length === 0 ? <p>{chatLogLoaded ? 'No chat messages match the current filters.' : 'Choose filters and load chat messages.'}</p> : null}
           </div>
         </section>
 
