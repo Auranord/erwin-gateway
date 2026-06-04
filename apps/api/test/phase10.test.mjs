@@ -150,6 +150,8 @@ test('webhook signing and retry/dead-letter behavior are implemented', () => {
   assert.match(source, /createHmac\('sha256'/, 'deliveries must use HMAC-SHA256');
   assert.match(source, /status: terminal \? 'dead_lettered' : 'retrying'/, 'failed deliveries must retry then dead-letter');
   assert.match(source, /const maxAttempts = 5/, 'retry limit must be explicit');
+  assert.doesNotMatch(source, /delivery_id: null/, 'stored delivery payloads must not contain a null delivery_id placeholder');
+  assert.match(source, /delivery_id: row\.delivery\.id/, 'outbound webhook body must include the real delivery_id');
 });
 
 test('outgoing chat idempotency prevents duplicate sends', () => {

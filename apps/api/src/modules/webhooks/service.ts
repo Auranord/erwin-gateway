@@ -103,7 +103,7 @@ export async function enqueueWebhookDeliveriesForEvent(db: Database, eventId: st
   const created = [];
   for (const row of endpoints) {
     if (!row.endpoint.url || !matchesFilters(row.endpoint.eventFilters, eventRow.type) || !appCanReceive(row.app, eventRow.type, eventRow.payload)) continue;
-    const payload = { schema: webhookSchema, delivery_id: null, event_id: eventRow.id, type: eventRow.type, occurred_at: eventRow.occurredAt.toISOString(), received_at: eventRow.createdAt.toISOString(), ...(eventRow.payload as Record<string, unknown>) };
+    const payload = { schema: webhookSchema, event_id: eventRow.id, type: eventRow.type, occurred_at: eventRow.occurredAt.toISOString(), received_at: eventRow.createdAt.toISOString(), ...(eventRow.payload as Record<string, unknown>) };
     const [delivery] = await db.insert(webhookDeliveries).values({ appId: row.app.id, endpointId: row.endpoint.id, eventId: eventRow.id, status: 'queued', payload }).onConflictDoNothing().returning();
     if (delivery) created.push(delivery);
   }
