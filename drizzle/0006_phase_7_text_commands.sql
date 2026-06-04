@@ -3,7 +3,6 @@ CREATE TABLE IF NOT EXISTS "text_commands" (
   "channel_id" uuid REFERENCES "twitch_channels"("id"),
   "command" text NOT NULL,
   "aliases_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
-  "prefix" varchar(8) DEFAULT '!' NOT NULL,
   "response_text" text NOT NULL,
   "enabled" boolean DEFAULT true NOT NULL,
   "required_role" varchar(32) DEFAULT 'everyone' NOT NULL,
@@ -17,8 +16,8 @@ CREATE TABLE IF NOT EXISTS "text_commands" (
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   "archived_at" timestamp with time zone
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "text_commands_channel_prefix_command_active_idx" ON "text_commands" (COALESCE("channel_id", '00000000-0000-0000-0000-000000000000'::uuid), lower("prefix"), lower("command")) WHERE "archived_at" IS NULL;
-CREATE INDEX IF NOT EXISTS "text_commands_channel_prefix_idx" ON "text_commands" ("channel_id", "prefix") WHERE "archived_at" IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "text_commands_channel_command_active_idx" ON "text_commands" (COALESCE("channel_id", '00000000-0000-0000-0000-000000000000'::uuid), lower("command")) WHERE "archived_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "text_commands_channel_idx" ON "text_commands" ("channel_id") WHERE "archived_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "text_commands_enabled_idx" ON "text_commands" ("enabled") WHERE "archived_at" IS NULL;
 
 CREATE TABLE IF NOT EXISTS "text_command_invocations" (

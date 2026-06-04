@@ -436,7 +436,6 @@ export const textCommands = pgTable('text_commands', {
   channelId: uuid('channel_id').references(() => twitchChannels.id),
   command: text('command').notNull(),
   aliases: jsonb('aliases_json').$type<string[]>().notNull().default([]),
-  prefix: varchar('prefix', { length: 8 }).notNull().default('!'),
   responseText: text('response_text').notNull(),
   enabled: boolean('enabled').notNull().default(true),
   requiredRole: varchar('required_role', { length: 32 }).notNull().default('everyone'),
@@ -450,7 +449,7 @@ export const textCommands = pgTable('text_commands', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   archivedAt: timestamp('archived_at', { withTimezone: true })
 }, (table) => [
-  index('text_commands_channel_prefix_idx').on(table.channelId, table.prefix),
+  index('text_commands_channel_idx').on(table.channelId),
   index('text_commands_enabled_idx').on(table.enabled)
 ]);
 

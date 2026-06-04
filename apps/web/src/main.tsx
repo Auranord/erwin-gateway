@@ -55,11 +55,11 @@ type TwitchSetupStatus = {
   degradedReasons: string[];
 };
 
-type ChatMessage = { id: string; chatterLogin: string | null; chatterDisplayName: string | null; text: string; isCommand: boolean; commandName: string | null; isBroadcaster: boolean; isMod: boolean; isVip: boolean; isSubscriber: boolean; createdAt: string; };
+type ChatMessage = { id: string; chatterLogin: string | null; chatterDisplayName: string | null; text: string; isCommand: boolean; commandSymbol: string | null; commandName: string | null; isBroadcaster: boolean; isMod: boolean; isVip: boolean; isSubscriber: boolean; createdAt: string; };
 
 type WebhookDelivery = { id: string; appId: string; endpointId: string; eventId: string; status: string; attempts: number; nextAttemptAt: string; lastError: string | null; deliveredAt: string | null; createdAt: string; };
 
-type TextCommand = { id: string; channelId: string | null; command: string; aliases: string[]; prefix: string; responseText: string; enabled: boolean; requiredRole: string; cooldownSeconds: number; userCooldownSeconds: number; replyMode: string; usageCount: number; lastUsedAt: string | null; createdAt: string; updatedAt: string; archivedAt: string | null; };
+type TextCommand = { id: string; channelId: string | null; command: string; aliases: string[]; responseText: string; enabled: boolean; requiredRole: string; cooldownSeconds: number; userCooldownSeconds: number; replyMode: string; usageCount: number; lastUsedAt: string | null; createdAt: string; updatedAt: string; archivedAt: string | null; };
 
 type ChannelPointReward = { id: string; twitchRewardId: string; owningAppId: string | null; title: string; cost: number; enabled: boolean; manageable: boolean; deletedAt: string | null; lastSyncedAt: string | null; };
 type ChannelPointRedemption = { id: string; twitchRedemptionId: string; rewardId: string | null; twitchRewardId: string; userLogin: string | null; userDisplayName: string | null; status: string; userInput: string | null; redeemedAt: string; eventId: string | null; };
@@ -135,11 +135,13 @@ function App() {
   const [outgoingMessages, setOutgoingMessages] = useState<OutgoingMessage[]>([]);
   const [outgoingStatus, setOutgoingStatus] = useState('');
   const [textCommands, setTextCommands] = useState<TextCommand[]>([]);
+  const [configuredPrefix, setConfiguredPrefix] = useState('!');
+  const [prefixDraft, setPrefixDraft] = useState('!');
   const [channelPointRewards, setChannelPointRewards] = useState<ChannelPointReward[]>([]);
   const [channelPointRedemptions, setChannelPointRedemptions] = useState<ChannelPointRedemption[]>([]);
   const [channelPointDiagnostics, setChannelPointDiagnostics] = useState<ChannelPointDiagnostics | null>(null);
   const [rewardForm, setRewardForm] = useState({ title: 'Hatchery Reward', cost: 1000, prompt: 'Redeem a Hatchery reward', is_enabled: true });
-  const [commandForm, setCommandForm] = useState({ command: 'dc', aliases: 'discord', prefix: '!', responseText: 'Join the Discord: https://discord.gg/example', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
+  const [commandForm, setCommandForm] = useState({ command: 'dc', aliases: 'discord', responseText: 'Join the Discord: https://discord.gg/example', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
   const [form, setForm] = useState({
@@ -226,10 +228,33 @@ function App() {
   }
 
   async function loadTextCommands() {
-    const response = await fetch('/api/admin/text-commands', { headers: adminHeaders() });
-    if (!response.ok) throw new Error(`Text commands API returned ${response.status}`);
-    const payload = await response.json();
+    const [commandsResponse, prefixResponse] = await Promise.all([
+      fetch('/api/admin/text-commands', { headers: adminHeaders() }),
+      fetch('/api/admin/text-commands/prefix', { headers: adminHeaders() })
+    ]);
+    if (!commandsResponse.ok) throw new Error(`Text commands API returned ${commandsResponse.status}`);
+    const payload = await commandsResponse.json();
     setTextCommands(payload.commands ?? []);
+    if (prefixResponse.ok) {
+      const prefixPayload = await prefixResponse.json();
+      const nextPrefix = prefixPayload.commandPrefix ?? '!';
+      setConfiguredPrefix(nextPrefix);
+      setPrefixDraft(nextPrefix);
+    }
+  }
+
+  async function updateCommandPrefix() {
+    const response = await fetch('/api/admin/text-commands/prefix', {
+      method: 'PATCH',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ commandPrefix: prefixDraft })
+    });
+    if (!response.ok) throw new Error(`Update command prefix failed with ${response.status}`);
+    const payload = await response.json();
+    const nextPrefix = payload.commandPrefix ?? prefixDraft;
+    setConfiguredPrefix(nextPrefix);
+    setPrefixDraft(nextPrefix);
+    await loadTextCommands();
   }
 
   async function loadChannelPoints() {
@@ -296,7 +321,6 @@ function App() {
       body: JSON.stringify({
         command: commandForm.command,
         aliases: splitCsv(commandForm.aliases),
-        prefix: commandForm.prefix,
         responseText: commandForm.responseText,
         enabled: commandForm.enabled,
         requiredRole: commandForm.requiredRole,
@@ -320,7 +344,7 @@ function App() {
   }
 
   async function deleteTextCommand(command: TextCommand) {
-    if (!window.confirm(`Delete text command ${command.prefix}${command.command}?`)) return;
+    if (!window.confirm(`Delete text command ${configuredPrefix}${command.command}?`)) return;
     const response = await fetch(`/api/admin/text-commands/${command.id}`, { method: 'DELETE', headers: adminHeaders() });
     if (!response.ok) throw new Error(`Delete text command failed with ${response.status}`);
     await loadTextCommands();
@@ -608,10 +632,14 @@ function App() {
             <button onClick={() => void loadTextCommands().catch((loadError) => setError(String(loadError)))}>Refresh commands</button>
           </div>
 
+          <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void updateCommandPrefix().catch((prefixError) => setError(String(prefixError))); }}>
+            <label>Global command prefix<input value={prefixDraft} onChange={(event) => setPrefixDraft(event.target.value)} maxLength={8} /></label>
+            <button type="submit">Save prefix</button>
+          </form>
+
           <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void createTextCommand().catch((createError) => setError(String(createError))); }}>
             <label>Command<input value={commandForm.command} onChange={(event) => setCommandForm({ ...commandForm, command: event.target.value })} placeholder="dc" /></label>
             <label>Aliases<input value={commandForm.aliases} onChange={(event) => setCommandForm({ ...commandForm, aliases: event.target.value })} placeholder="discord,youtube" /></label>
-            <label>Prefix<input value={commandForm.prefix} onChange={(event) => setCommandForm({ ...commandForm, prefix: event.target.value })} /></label>
             <label>Response text<textarea value={commandForm.responseText} onChange={(event) => setCommandForm({ ...commandForm, responseText: event.target.value })} /></label>
             <label>Required role<select value={commandForm.requiredRole} onChange={(event) => setCommandForm({ ...commandForm, requiredRole: event.target.value })}>{['everyone', 'subscriber', 'vip', 'moderator', 'broadcaster'].map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
             <label>Global cooldown seconds<input type="number" min="0" value={commandForm.cooldownSeconds} onChange={(event) => setCommandForm({ ...commandForm, cooldownSeconds: Number(event.target.value) })} /></label>
@@ -626,13 +654,13 @@ function App() {
               <article className="delivery-row" key={command.id}>
                 <div className="app-card-header">
                   <div>
-                    <h3>{command.prefix}{command.command}</h3>
+                    <h3>{configuredPrefix}{command.command}</h3>
                     <p>{command.responseText}</p>
                   </div>
                   <button onClick={() => void updateTextCommand(command, { enabled: !command.enabled }).catch((updateError) => setError(String(updateError)))}>{command.enabled ? 'Disable' : 'Enable'}</button>
                 </div>
                 <div className="chips">
-                  {command.aliases.map((alias) => <span key={alias}>{command.prefix}{alias}</span>)}
+                  {command.aliases.map((alias) => <span key={alias}>{configuredPrefix}{alias}</span>)}
                   <span>role {command.requiredRole}</span>
                   <span>global cooldown {command.cooldownSeconds}s</span>
                   <span>user cooldown {command.userCooldownSeconds}s</span>
@@ -646,7 +674,7 @@ function App() {
                 </div>
               </article>
             ))}
-            {textCommands.length === 0 ? <p>No text commands configured yet. Create <code>!dc</code> above to move a Discord link into the gateway.</p> : null}
+            {textCommands.length === 0 ? <p>No text commands configured yet. Create <code>{configuredPrefix}dc</code> above to move a Discord link into the gateway.</p> : null}
           </div>
         </section>
 
@@ -712,7 +740,7 @@ function App() {
                 <div><strong>{message.chatterDisplayName ?? message.chatterLogin ?? 'unknown'}</strong> <span>{new Date(message.createdAt).toLocaleString()}</span></div>
                 <p>{message.text}</p>
                 <div className="chips">
-                  {message.isCommand ? <span>!{message.commandName}</span> : <span>message</span>}
+                  {message.isCommand ? <span>{message.commandSymbol ?? configuredPrefix}{message.commandName}</span> : <span>message</span>}
                   {message.isBroadcaster ? <span>broadcaster</span> : null}
                   {message.isMod ? <span>mod</span> : null}
                   {message.isVip ? <span>vip</span> : null}
