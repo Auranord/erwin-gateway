@@ -160,6 +160,17 @@ test('webhook signing and retry/dead-letter behavior are implemented', () => {
   assert.match(source, /delivery_id: row\.delivery\.id/, 'outbound webhook body must include the real delivery_id');
 });
 
+test('app-facing webhook delivery routes are scoped to the authenticated app', () => {
+  const appRoutesSource = readSource('modules/apps/routes.ts');
+  const webhookServiceSource = readSource('modules/webhooks/service.ts');
+
+  assert.match(appRoutesSource, /listWebhookDeliveries\(options\.db, \{ \.\.\.query\.data, appId: authenticatedApp\.id \}\)/, 'app delivery list must filter by authenticated app id');
+  assert.match(appRoutesSource, /!result \|\| result\.delivery\.appId !== authenticatedApp\.id\) return reply\.code\(404\)/, 'app delivery details must hide non-owned deliveries behind 404');
+  assert.match(appRoutesSource, /getWebhookDeliveryWithAttempts\(options\.db, params\.data\.deliveryId\);[\s\S]*if \(!result \|\| result\.delivery\.appId !== authenticatedApp\.id\) return reply\.code\(404\)[\s\S]*const delivery = await deliverWebhookNow/, 'app delivery retry must verify ownership before dispatching');
+  assert.match(webhookServiceSource, /appId\?: string/, 'delivery listing helper must accept an optional app id scope');
+  assert.match(webhookServiceSource, /eq\(webhookDeliveries\.appId, query\.appId\)/, 'delivery listing helper must apply the app id scope when provided');
+});
+
 test('outgoing chat idempotency prevents duplicate sends', () => {
   const source = readSource('modules/twitch-chat/service.ts');
   assert.match(source, /scope, 'outgoing_chat_message'/, 'idempotency scope must be outgoing chat');
