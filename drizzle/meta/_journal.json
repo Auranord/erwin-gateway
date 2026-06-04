@@ -12,6 +12,7 @@
     { "idx": 7, "version": "7", "when": 1700000007000, "tag": "0007_phase_8_channel_points", "breakpoints": true },
     { "idx": 8, "version": "7", "when": 1700000008000, "tag": "0008_phase_9_twitch_data", "breakpoints": true },
     { "idx": 9, "version": "7", "when": 1700000009000, "tag": "0009_reward_sync_missing_on_twitch", "breakpoints": true },
-    { "idx": 10, "version": "7", "when": 1700000010000, "tag": "0010_channel_command_prefix_text_commands", "breakpoints": true }
+    { "idx": 10, "version": "7", "when": 1700000010000, "tag": "0010_channel_command_prefix_text_commands", "breakpoints": true },
+    { "idx": 11, "version": "7", "when": 1700000011000, "tag": "0011_archive_apps_reusable_slugs", "breakpoints": true }
   ]
 }

@@ -114,12 +114,15 @@ test('app API key authentication rejects revoked keys by query shape', () => {
   assert.doesNotMatch(source, /rawKey\s*:/, 'app auth route must not persist raw API keys');
 });
 
-test('admin app archive route soft-disables apps and preserves auditability', () => {
+test('admin app archive route frees app slugs and preserves auditability', () => {
   const source = readSource('modules/admin/routes.ts');
   assert.match(source, /app\.delete\('\/api\/admin\/apps\/:id'/, 'admin app archive route must exist');
+  assert.match(source, /archivedAt/, 'archive route must set explicit archivedAt semantics');
+  assert.match(source, /buildArchivedSlug\(record\.slug, record\.id\)/, 'archive route must rename archived app slugs so originals are reusable');
   assert.match(source, /enabled: false/, 'archive route must soft-disable the app rather than hard-delete it');
   assert.match(source, /isNull\(appApiKeys\.revokedAt\)/, 'archive route must revoke active app API keys');
   assert.match(source, /options\.db\.update\(appWebhookEndpoints\)\.set\(\{[\s\S]*enabled: false/, 'archive route must disable app webhook endpoints');
+  assert.match(source, /archived: true/, 'archive route response must report actual archive behavior');
   assert.match(source, /app\.archive/, 'archive route must audit the action');
   assert.doesNotMatch(source, /delete\(apps\)/, 'archive route must not hard-delete app rows');
 });

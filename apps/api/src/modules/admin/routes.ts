@@ -144,6 +144,7 @@ function serializeApp(
     description: appRecord.description,
     permissions: appRecord.permissions,
     createdAt: appRecord.createdAt.toISOString(),
+    archivedAt: appRecord.archivedAt?.toISOString() ?? null,
     updatedAt: appRecord.updatedAt.toISOString(),
     apiKeys: keys.map(serializeKey),
     webhook: serializeWebhook(webhook)
@@ -152,6 +153,12 @@ function serializeApp(
 
 async function audit(db: Database, action: string, targetType: string, targetId: string, metadata: Record<string, unknown> = {}) {
   await db.insert(adminAuditLog).values({ action, targetType, targetId, metadata });
+}
+
+function buildArchivedSlug(slug: string, appId: string) {
+  const shortId = appId.replaceAll('-', '').slice(0, 8);
+  const suffix = `--archived-${shortId}`;
+  return `${slug.slice(0, 80 - suffix.length)}${suffix}`;
 }
 
 async function getFirstWebhook(db: Database, appId: string) {
@@ -318,8 +325,11 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     if (!record) return reply.code(404).send({ error: 'App not found' });
 
     const archivedAt = new Date();
+    const archivedSlug = buildArchivedSlug(record.slug, record.id);
     const [archived] = await options.db.update(apps).set({
+      slug: archivedSlug,
       enabled: false,
+      archivedAt,
       updatedAt: archivedAt
     }).where(eq(apps.id, record.id)).returning();
 
@@ -336,7 +346,8 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
 
     await audit(options.db, 'app.archive', 'app', record.id, {
       slug: record.slug,
-      archivalStrategy: 'soft-disable',
+      archivedSlug,
+      archivalStrategy: 'archive-with-reusable-slug',
       previousEnabled: record.enabled,
       revokedApiKeyIds: revokedKeys.map((key) => key.id),
       disabledWebhookEndpointIds: disabledWebhooks.map((webhook) => webhook.id)
@@ -344,7 +355,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
 
     const keys = await options.db.select().from(appApiKeys).where(eq(appApiKeys.appId, record.id)).orderBy(desc(appApiKeys.createdAt));
     const webhook = await getFirstWebhook(options.db, record.id);
-    return { app: serializeApp(archived ?? { ...record, enabled: false, updatedAt: archivedAt }, keys, webhook), archivedAt: archivedAt.toISOString() };
+    return { archived: true, app: serializeApp(archived ?? { ...record, slug: archivedSlug, enabled: false, archivedAt, updatedAt: archivedAt }, keys, webhook), archivedAt: archivedAt.toISOString(), previousSlug: record.slug, archivedSlug };
   });
 
   app.post('/api/admin/apps/:id/keys', async (request, reply) => {
