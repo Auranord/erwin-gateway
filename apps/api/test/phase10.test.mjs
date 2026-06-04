@@ -162,6 +162,8 @@ test('outgoing chat idempotency prevents duplicate sends', () => {
 test('Channel Point reward mutations enforce ownership', () => {
   const source = readSource('modules/channel-points/service.ts');
   assert.match(source, /owningAppId !== app\.id/, 'non-owning app must be rejected for reward mutation');
+  assert.match(source, /!reward\.manageable/, 'non-manageable rewards must be rejected before Twitch reward mutations');
+  assert.match(source, /Reward is not manageable by this Twitch client/, 'non-manageable reward mutation errors must be clear');
   assert.match(source, /channel_points:redemptions:manage/, 'redemption management permission must be checked');
   assert.match(source, /Gateway never auto-fulfills/, 'service must document explicit fulfillment behavior');
 });
