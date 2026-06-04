@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
-import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints, events, twitchChannelPointRewards, webhookDeliveries } from '../../db/schema.js';
+import { adminAuditLog, appApiKeys, apps, appWebhookEndpoints, events, twitchChannelPointRewards, twitchChannels, webhookDeliveries } from '../../db/schema.js';
 import { archiveTextCommand, createTextCommand, getTextCommand, listTextCommandInvocations, listTextCommands, testTextCommand, textCommandReplyModes, textCommandRoles, updateTextCommand } from '../text-commands/service.js';
 import { generateAppApiKey } from '../apps/api-keys.js';
 import { appPermissions, defaultAppPermissions, normalizePermissions } from '../apps/permissions.js';
@@ -49,7 +49,6 @@ const textCommandSchema = z.object({
   channelId: z.string().uuid().optional().nullable(),
   command: z.string().min(1).max(80),
   aliases: z.array(z.string()).default([]),
-  prefix: z.string().min(1).max(8).default('!'),
   responseText: z.string().min(1).max(500),
   enabled: z.boolean().optional(),
   requiredRole: z.enum(textCommandRoles).default('everyone'),
@@ -419,6 +418,24 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     return { delivery: await deliverWebhookNow(options.db, delivery.id, true) };
   });
 
+
+  app.get('/api/admin/twitch/primary-channel/command-prefix', async (_request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const [channel] = await options.db.select().from(twitchChannels).where(eq(twitchChannels.primaryChannel, true)).limit(1);
+    if (!channel) return reply.code(404).send({ error: 'Primary Twitch channel not found' });
+    return { channelId: channel.id, commandPrefix: channel.commandPrefix };
+  });
+
+  app.patch('/api/admin/twitch/primary-channel/command-prefix', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const parsed = z.object({ commandPrefix: z.string().trim().min(1).max(8) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid command prefix payload', issues: parsed.error.issues });
+    const [existing] = await options.db.select().from(twitchChannels).where(eq(twitchChannels.primaryChannel, true)).limit(1);
+    if (!existing) return reply.code(404).send({ error: 'Primary Twitch channel not found' });
+    const [channel] = await options.db.update(twitchChannels).set({ commandPrefix: parsed.data.commandPrefix, updatedAt: new Date() }).where(eq(twitchChannels.id, existing.id)).returning();
+    await audit(options.db, 'twitch_channel.command_prefix.update', 'twitch_channel', channel!.id, { commandPrefix: channel!.commandPrefix });
+    return { channelId: channel!.id, commandPrefix: channel!.commandPrefix };
+  });
 
   app.get('/api/admin/text-commands', async (_request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;
