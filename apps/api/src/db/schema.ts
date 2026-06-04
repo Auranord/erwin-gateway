@@ -44,6 +44,7 @@ export const apps = pgTable('apps', {
   enabled: boolean('enabled').notNull().default(true),
   description: text('description'),
   permissions: jsonb('permissions_json').$type<string[]>().notNull().default([]),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
   ...timestamps
 }, (table) => [uniqueIndex('apps_slug_idx').on(table.slug)]);
 

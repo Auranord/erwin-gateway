@@ -74,6 +74,7 @@ type RegisteredApp = {
   enabled: boolean;
   description: string | null;
   permissions: string[];
+  archivedAt: string | null;
   apiKeys: ApiKey[];
   webhook: Webhook;
 };
@@ -487,10 +488,12 @@ function App() {
   }
 
   async function archiveApp(app: RegisteredApp) {
-    const confirmation = window.prompt(`Archive app ${app.slug}? This soft removal disables the app, revokes all API keys, and disables webhook endpoints while keeping records auditable. Type ${app.slug} to confirm.`);
+    const confirmation = window.prompt(`Archive app ${app.slug}? This renames the stored slug so ${app.slug} can be reused, disables the app, revokes all API keys, and disables webhook endpoints while keeping records auditable. Type ${app.slug} to confirm.`);
     if (confirmation !== app.slug) return;
     const response = await fetch(`/api/admin/apps/${app.id}`, { method: 'DELETE', headers: adminHeaders() });
     if (!response.ok) throw new Error(`Archive app failed with ${response.status}`);
+    const payload = await response.json();
+    if (!payload.archived) throw new Error('Archive app response did not confirm archival');
     await loadApps();
   }
 
