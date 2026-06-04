@@ -156,6 +156,9 @@ function App() {
   const [chatLimit, setChatLimit] = useState(50);
   const [chatLogLoaded, setChatLogLoaded] = useState(false);
   const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>([]);
+  const [webhookDeliveryStatus, setWebhookDeliveryStatus] = useState('');
+  const [webhookDeliveryLimit, setWebhookDeliveryLimit] = useState(100);
+  const [webhookDeliveriesLoaded, setWebhookDeliveriesLoaded] = useState(false);
   const [outgoingMessages, setOutgoingMessages] = useState<OutgoingMessage[]>([]);
   const [outgoingStatus, setOutgoingStatus] = useState('');
   const [outgoingLimit, setOutgoingLimit] = useState(100);
@@ -269,7 +272,6 @@ function App() {
 
     void loadApps();
     void loadTwitchStatus();
-    void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
     void loadTextCommands().catch((loadError) => setError(String(loadError)));
     void loadCommandPrefix().catch((loadError) => setError(String(loadError)));
     void loadChannelPoints().catch((loadError) => setError(String(loadError)));
@@ -287,11 +289,16 @@ function App() {
     setChatLogLoaded(true);
   }
 
-  async function loadWebhookDeliveries() {
-    const response = await fetch('/api/admin/webhook-deliveries?limit=100', { headers: adminHeaders() });
+  async function loadWebhookDeliveries(status = webhookDeliveryStatus, limit = webhookDeliveryLimit) {
+    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 100;
+    setWebhookDeliveryLimit(normalizedLimit);
+    const params = new URLSearchParams({ limit: String(normalizedLimit) });
+    if (status) params.set('status', status);
+    const response = await fetch(`/api/admin/webhook-deliveries?${params}`, { headers: adminHeaders() });
     if (!response.ok) throw new Error(`Webhook deliveries API returned ${response.status}`);
     const payload = await response.json();
     setWebhookDeliveries(payload.deliveries ?? []);
+    setWebhookDeliveriesLoaded(true);
   }
 
 
@@ -399,7 +406,7 @@ function App() {
   async function retryWebhookDelivery(deliveryId: string) {
     const response = await fetch(`/api/admin/webhook-deliveries/${deliveryId}/retry`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
     if (!response.ok) throw new Error(`Retry delivery failed with ${response.status}`);
-    await loadWebhookDeliveries();
+    if (webhookDeliveriesLoaded) await loadWebhookDeliveries();
   }
 
   async function retryOutgoingMessage(messageId: string) {
@@ -465,7 +472,7 @@ function App() {
   async function testAppWebhook(appId: string) {
     const response = await fetch(`/api/admin/apps/${appId}/webhook-test`, { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({}) });
     if (!response.ok) throw new Error(`Webhook test failed with ${response.status}`);
-    await loadWebhookDeliveries();
+    if (webhookDeliveriesLoaded) await loadWebhookDeliveries();
     await loadApps();
   }
 
@@ -1016,7 +1023,18 @@ function App() {
               <p className="eyebrow">Fanout reliability</p>
               <h2>Webhook Deliveries</h2>
             </div>
-            <button onClick={() => void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)))}>Refresh deliveries</button>
+            <form className="button-row" onSubmit={(event) => { event.preventDefault(); void loadWebhookDeliveries(webhookDeliveryStatus, webhookDeliveryLimit).catch((loadError) => setError(String(loadError))); }}>
+              <label>Status
+                <select value={webhookDeliveryStatus} onChange={(event) => setWebhookDeliveryStatus(event.target.value)}>
+                  <option value="">All statuses</option>
+                  {['queued', 'sending', 'delivered', 'retrying', 'dead_lettered'].map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </label>
+              <label>Limit
+                <input type="number" min="1" max="500" value={webhookDeliveryLimit} onChange={(event) => setWebhookDeliveryLimit(Number.isNaN(event.target.valueAsNumber) ? 1 : event.target.valueAsNumber)} />
+              </label>
+              <button type="submit">Load deliveries</button>
+            </form>
           </div>
           <div className="table-list">
             {webhookDeliveries.map((delivery) => (
@@ -1027,7 +1045,7 @@ function App() {
                 <button onClick={() => void retryWebhookDelivery(delivery.id).catch((retryError) => setError(String(retryError)))}>Retry</button>
               </article>
             ))}
-            {webhookDeliveries.length === 0 ? <p>No webhook deliveries recorded yet.</p> : null}
+            {webhookDeliveries.length === 0 ? <p>{webhookDeliveriesLoaded ? 'No webhook deliveries match the current filters.' : 'Choose filters and load webhook deliveries.'}</p> : null}
           </div>
         </section>
 
