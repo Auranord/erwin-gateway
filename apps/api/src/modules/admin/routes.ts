@@ -583,9 +583,11 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     should_redemptions_skip_request_queue: z.boolean().optional()
   });
 
-  app.get('/api/admin/channel-points', async (_request, reply) => {
+  app.get('/api/admin/channel-points', async (request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;
-    const rewards = await listRewards(options.db, adminChannelPointApp, { includeDeleted: true });
+    const query = z.object({ includeDeleted: z.enum(['true', 'false']).optional().default('false') }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
+    const rewards = await listRewards(options.db, adminChannelPointApp, { includeDeleted: query.data.includeDeleted === 'true' });
     const redemptions = await listRedemptions(options.db, adminChannelPointApp, { limit: 25 });
     return { rewards: rewards.ok ? rewards.rewards : [], redemptions: redemptions.ok ? redemptions.redemptions : [], diagnostics: await channelPointDiagnostics(options.db) };
   });
