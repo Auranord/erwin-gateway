@@ -424,7 +424,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
       processedAt: new Date()
     }).returning();
     if (!event) return reply.code(500).send({ error: 'Test event was not created' });
-    const [delivery] = await options.db.insert(webhookDeliveries).values({ appId: record.id, endpointId: webhook.id, eventId: event.id, status: 'queued', payload: { schema: 'erwin.gateway.webhook.v1', delivery_id: null, event_id: event.id, type: event.type, occurred_at: event.occurredAt.toISOString(), received_at: event.createdAt.toISOString(), test: true, app_id: record.id, message: 'Webhook test from erwin-gateway' } }).returning();
+    const [delivery] = await options.db.insert(webhookDeliveries).values({ appId: record.id, endpointId: webhook.id, eventId: event.id, status: 'queued', payload: { schema: 'erwin.gateway.webhook.v1', event_id: event.id, type: event.type, occurred_at: event.occurredAt.toISOString(), received_at: event.createdAt.toISOString(), test: true, app_id: record.id, message: 'Webhook test from erwin-gateway' } }).returning();
     if (!delivery) return reply.code(500).send({ error: 'Test delivery was not created' });
     return { delivery: await deliverWebhookNow(options.db, delivery.id, true) };
   });
