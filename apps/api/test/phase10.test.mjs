@@ -114,6 +114,16 @@ test('app API key authentication rejects revoked keys by query shape', () => {
   assert.doesNotMatch(source, /rawKey\s*:/, 'app auth route must not persist raw API keys');
 });
 
+test('admin app archive route soft-disables apps and preserves auditability', () => {
+  const source = readSource('modules/admin/routes.ts');
+  assert.match(source, /app\.delete\('\/api\/admin\/apps\/:id'/, 'admin app archive route must exist');
+  assert.match(source, /enabled: false/, 'archive route must soft-disable the app rather than hard-delete it');
+  assert.match(source, /isNull\(appApiKeys\.revokedAt\)/, 'archive route must revoke active app API keys');
+  assert.match(source, /options\.db\.update\(appWebhookEndpoints\)\.set\(\{[\s\S]*enabled: false/, 'archive route must disable app webhook endpoints');
+  assert.match(source, /app\.archive/, 'archive route must audit the action');
+  assert.doesNotMatch(source, /delete\(apps\)/, 'archive route must not hard-delete app rows');
+});
+
 test('Twitch EventSub signature verification uses raw request body HMAC', () => {
   const secret = 'eventsub-secret';
   const messageId = 'msg-1';

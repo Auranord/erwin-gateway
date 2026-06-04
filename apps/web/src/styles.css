@@ -179,6 +179,16 @@ button:focus-visible {
   background: rgba(79, 70, 229, 0.45);
 }
 
+button.destructive {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(127, 29, 29, 0.36);
+}
+
+button.destructive:hover,
+button.destructive:focus-visible {
+  background: rgba(185, 28, 28, 0.52);
+}
+
 input {
   width: 100%;
   margin-top: 0.35rem;
@@ -289,6 +299,18 @@ code {
   margin: 0;
 }
 
+.app-card.archived {
+  border-color: rgba(248, 113, 113, 0.32);
+  opacity: 0.76;
+}
+
+.app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
 .webhook-row,
 .keys-heading,
 .key-list {
@@ -318,7 +340,8 @@ code {
   .section-heading,
   .app-card-header,
   .keys-heading,
-  .key {
+  .key,
+  .app-actions {
     align-items: stretch;
     flex-direction: column;
   }

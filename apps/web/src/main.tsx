@@ -376,6 +376,14 @@ function App() {
     await loadApps();
   }
 
+  async function archiveApp(app: RegisteredApp) {
+    const confirmation = window.prompt(`Archive app ${app.slug}? This soft removal disables the app, revokes all API keys, and disables webhook endpoints while keeping records auditable. Type ${app.slug} to confirm.`);
+    if (confirmation !== app.slug) return;
+    const response = await fetch(`/api/admin/apps/${app.id}`, { method: 'DELETE', headers: adminHeaders() });
+    if (!response.ok) throw new Error(`Archive app failed with ${response.status}`);
+    await loadApps();
+  }
+
   async function generateKey(app: RegisteredApp) {
     const name = window.prompt('Key name', `${app.slug} key`);
     if (!name) return;
@@ -550,15 +558,18 @@ function App() {
 
           <div className="app-list">
             {apps.map((registeredApp) => (
-              <article className="app-card" key={registeredApp.id}>
+              <article className={registeredApp.enabled ? 'app-card' : 'app-card archived'} key={registeredApp.id}>
                 <div className="app-card-header">
                   <div>
                     <h3>{registeredApp.name}</h3>
                     <p>{registeredApp.slug} · {registeredApp.description ?? 'No description'}</p>
                   </div>
-                  <button onClick={() => void updateApp(registeredApp, { enabled: !registeredApp.enabled }).catch((updateError) => setError(String(updateError)))}>
-                    {registeredApp.enabled ? 'Disable' : 'Enable'}
-                  </button>
+                  <div className="app-actions">
+                    <button onClick={() => void updateApp(registeredApp, { enabled: !registeredApp.enabled }).catch((updateError) => setError(String(updateError)))}>
+                      {registeredApp.enabled ? 'Disable' : 'Enable'}
+                    </button>
+                    <button className="destructive" onClick={() => void archiveApp(registeredApp).catch((archiveError) => setError(String(archiveError)))}>Archive</button>
+                  </div>
                 </div>
 
                 <div className="chips">{registeredApp.permissions.map((permission) => <span key={permission}>{permission}</span>)}</div>
