@@ -183,7 +183,8 @@ function App() {
   });
   const [appEditForms, setAppEditForms] = useState<Record<string, AppEditForm>>({});
 
-  const activeApps = useMemo(() => apps.filter((app) => app.enabled).length, [apps]);
+  const visibleApps = useMemo(() => apps.filter((app) => !app.archivedAt), [apps]);
+  const activeApps = useMemo(() => visibleApps.filter((app) => app.enabled).length, [visibleApps]);
 
   function adminHeaders(extraHeaders: Record<string, string> = {}) {
     return adminKey ? { ...extraHeaders, 'X-Admin-API-Key': adminKey } : extraHeaders;
@@ -752,7 +753,7 @@ function App() {
           </div>
 
           <div className="app-list">
-            {apps.map((registeredApp) => {
+            {visibleApps.map((registeredApp) => {
               const editForm = appEditForms[registeredApp.id];
               const invalidEditPermissions = editForm ? validateAppEditPermissions(editForm) : [];
 
@@ -1059,7 +1060,7 @@ function App() {
             <label>Prompt<textarea value={rewardForm.prompt} onChange={(event) => setRewardForm({ ...rewardForm, prompt: event.target.value })} placeholder="Example: Redeem a Hatchery reward" /></label>
             <label>Owning app<select required value={rewardForm.owning_app_id} onChange={(event) => setRewardForm({ ...rewardForm, owning_app_id: event.target.value })}>
               <option value="">Select an owning app</option>
-              {apps.map((registeredApp) => <option key={registeredApp.id} value={registeredApp.id}>{registeredApp.slug} — {registeredApp.name}</option>)}
+              {visibleApps.map((registeredApp) => <option key={registeredApp.id} value={registeredApp.id}>{registeredApp.slug} — {registeredApp.name}</option>)}
             </select></label>
             <label className="checkbox-label"><input type="checkbox" checked={rewardForm.is_enabled} onChange={(event) => setRewardForm({ ...rewardForm, is_enabled: event.target.checked })} /> Enabled</label>
             <button type="submit">Create reward</button>

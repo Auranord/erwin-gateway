@@ -114,6 +114,12 @@ test('app API key authentication rejects revoked keys by query shape', () => {
   assert.doesNotMatch(source, /rawKey\s*:/, 'app auth route must not persist raw API keys');
 });
 
+test('admin app list excludes archived downstream apps from UI payloads', () => {
+  const source = readSource('modules/admin/routes.ts');
+  assert.match(source, /app\.get\('\/api\/admin\/apps'/, 'admin app list route must exist');
+  assert.match(source, /select\(\)\.from\(apps\)\.where\(isNull\(apps\.archivedAt\)\)\.orderBy\(apps\.slug\)/, 'admin app list must exclude archived downstream apps');
+});
+
 test('admin app archive route frees app slugs and preserves auditability', () => {
   const source = readSource('modules/admin/routes.ts');
   assert.match(source, /app\.delete\('\/api\/admin\/apps\/:id'/, 'admin app archive route must exist');
