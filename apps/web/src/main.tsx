@@ -161,6 +161,7 @@ function App() {
   const [configuredPrefix, setConfiguredPrefix] = useState('!');
   const [prefixForm, setPrefixForm] = useState('!');
   const [channelPointRewards, setChannelPointRewards] = useState<ChannelPointReward[]>([]);
+  const [showDeletedChannelPointRewards, setShowDeletedChannelPointRewards] = useState(false);
   const [channelPointRedemptions, setChannelPointRedemptions] = useState<ChannelPointRedemption[]>([]);
   const [channelPointDiagnostics, setChannelPointDiagnostics] = useState<ChannelPointDiagnostics | null>(null);
   const [rewardForm, setRewardForm] = useState({ title: '', cost: '', prompt: '', owning_app_id: '', is_enabled: true });
@@ -285,8 +286,11 @@ function App() {
     setTextCommands(payload.commands ?? []);
   }
 
-  async function loadChannelPoints() {
-    const response = await fetch('/api/admin/channel-points', { headers: adminHeaders() });
+  async function loadChannelPoints(includeDeleted = showDeletedChannelPointRewards) {
+    const params = new URLSearchParams();
+    if (includeDeleted) params.set('includeDeleted', 'true');
+    const queryString = params.toString();
+    const response = await fetch(`/api/admin/channel-points${queryString ? `?${queryString}` : ''}`, { headers: adminHeaders() });
     if (!response.ok) throw new Error(`Channel Points API returned ${response.status}`);
     const payload = await response.json();
     setChannelPointRewards(payload.rewards ?? []);
@@ -979,6 +983,7 @@ function App() {
             <div className="button-row">
               <button onClick={() => void syncChannelPoints().catch((syncError) => setError(String(syncError)))}>Sync from Twitch</button>
               <button onClick={() => void loadChannelPoints().catch((loadError) => setError(String(loadError)))}>Refresh</button>
+              <label className="checkbox-label"><input type="checkbox" checked={showDeletedChannelPointRewards} onChange={(event) => { const checked = event.target.checked; setShowDeletedChannelPointRewards(checked); void loadChannelPoints(checked).catch((loadError) => setError(String(loadError))); }} /> Show deleted/local stale rewards</label>
             </div>
           </div>
 
@@ -1007,10 +1012,10 @@ function App() {
             {channelPointRewards.map((reward) => (
               <article className="delivery-row" key={reward.id}>
                 <div><strong>{reward.title}</strong> <code>{reward.twitchRewardId}</code></div>
-                <p>cost {reward.cost} · owner {apps.find((app) => app.id === reward.owningAppId)?.slug ?? reward.owningAppId ?? 'unmapped'} · {reward.enabled ? 'enabled' : 'disabled'} · {reward.manageable ? 'manageable' : 'not manageable'}</p>
+                <p>cost {reward.cost} · owner {apps.find((app) => app.id === reward.owningAppId)?.slug ?? reward.owningAppId ?? 'unmapped'} · {reward.enabled ? 'enabled' : 'disabled'} · {reward.manageable ? 'manageable' : 'not manageable'}{reward.deletedAt ? ` · deleted ${new Date(reward.deletedAt).toLocaleString()}` : ''}</p>
                 <div className="button-row">
-                  <button onClick={() => void updateChannelPointReward(reward, { is_enabled: !reward.enabled }).catch((updateError) => setError(String(updateError)))}>{reward.enabled ? 'Disable' : 'Enable'}</button>
-                  <button onClick={() => void deleteChannelPointReward(reward).catch((deleteError) => setError(String(deleteError)))}>Delete</button>
+                  <button disabled={Boolean(reward.deletedAt)} title={reward.deletedAt ? 'Deleted rewards cannot be updated on Twitch' : undefined} onClick={() => void updateChannelPointReward(reward, { is_enabled: !reward.enabled }).catch((updateError) => setError(String(updateError)))}>{reward.enabled ? 'Disable' : 'Enable'}</button>
+                  <button disabled={Boolean(reward.deletedAt)} title={reward.deletedAt ? 'Deleted rewards cannot be deleted on Twitch' : undefined} onClick={() => void deleteChannelPointReward(reward).catch((deleteError) => setError(String(deleteError)))}>Delete</button>
                 </div>
               </article>
             ))}
