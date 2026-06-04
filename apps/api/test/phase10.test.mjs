@@ -133,6 +133,21 @@ test('admin app archive route frees app slugs and preserves auditability', () =>
   assert.doesNotMatch(source, /delete\(apps\)/, 'archive route must not hard-delete app rows');
 });
 
+test('direct admin app mutations reject archived downstream apps', () => {
+  const source = readSource('modules/admin/routes.ts');
+  assert.match(source, /async function getActiveAdminApp\(db: Database, id: string\)/, 'admin routes must use a shared active app lookup');
+  assert.match(source, /and\(eq\(apps\.id, id\), isNull\(apps\.archivedAt\)\)/, 'active app lookup must exclude archived apps');
+  for (const route of ["app.patch('/api/admin/apps/:id'", "app.post('/api/admin/apps/:id/keys'", "app.post('/api/admin/apps/:id/webhook-secret'", "app.post('/api/admin/apps/:id/webhook-test'", "app.delete('/api/admin/apps/:id/keys/:keyId'"]) {
+    const start = source.indexOf(route);
+    assert.notEqual(start, -1, `${route} route must exist`);
+    const nextRoute = source.indexOf('\n  app.', start + route.length);
+    const block = source.slice(start, nextRoute === -1 ? undefined : nextRoute);
+    assert.match(block, /getActiveAdminApp\(options\.db, params\.data\.id\)/, `${route} must require an active app`);
+    assert.match(block, /reply\.code\(404\)\.send\(\{ error: 'App not found' \}\)/, `${route} must hide archived apps behind not found`);
+  }
+  assert.match(source, /update\(apps\)\.set\(updateValues\)\.where\(and\(eq\(apps\.id, record\.id\), isNull\(apps\.archivedAt\)\)\)/, 'app update must keep archivedAt guard on the write');
+});
+
 test('Twitch EventSub signature verification uses raw request body HMAC', () => {
   const secret = 'eventsub-secret';
   const messageId = 'msg-1';

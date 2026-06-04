@@ -161,6 +161,11 @@ function buildArchivedSlug(slug: string, appId: string) {
   return `${slug.slice(0, 80 - suffix.length)}${suffix}`;
 }
 
+async function getActiveAdminApp(db: Database, id: string) {
+  const [record] = await db.select().from(apps).where(and(eq(apps.id, id), isNull(apps.archivedAt))).limit(1);
+  return record;
+}
+
 async function getFirstWebhook(db: Database, appId: string) {
   const [webhook] = await db
     .select()
@@ -300,7 +305,10 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     if (parsed.data.enabled !== undefined) updateValues.enabled = parsed.data.enabled;
     if (parsed.data.permissions !== undefined) updateValues.permissions = normalizePermissions(parsed.data.permissions);
 
-    const [updated] = await options.db.update(apps).set(updateValues).where(eq(apps.id, params.data.id)).returning();
+    const record = await getActiveAdminApp(options.db, params.data.id);
+    if (!record) return reply.code(404).send({ error: 'App not found' });
+
+    const [updated] = await options.db.update(apps).set(updateValues).where(and(eq(apps.id, record.id), isNull(apps.archivedAt))).returning();
     if (!updated) return reply.code(404).send({ error: 'App not found' });
 
     await upsertDefaultWebhook(options.db, updated.id, parsed.data.webhookUrl, parsed.data.webhookEventFilters);
@@ -365,7 +373,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     const parsed = createKeySchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid key payload', issues: parsed.error.issues });
 
-    const [record] = await options.db.select().from(apps).where(eq(apps.id, params.data.id)).limit(1);
+    const record = await getActiveAdminApp(options.db, params.data.id);
     if (!record) return reply.code(404).send({ error: 'App not found' });
 
     const generated = generateAppApiKey(options.config);
@@ -397,7 +405,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     if (!requireDatabase(options.db, reply)) return reply;
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid app id' });
-    const [record] = await options.db.select().from(apps).where(eq(apps.id, params.data.id)).limit(1);
+    const record = await getActiveAdminApp(options.db, params.data.id);
     if (!record) return reply.code(404).send({ error: 'App not found' });
     const webhook = await getFirstWebhook(options.db, record.id);
     if (!webhook) return reply.code(404).send({ error: 'Webhook not found' });
@@ -411,7 +419,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     if (!requireDatabase(options.db, reply)) return reply;
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid app id' });
-    const [record] = await options.db.select().from(apps).where(eq(apps.id, params.data.id)).limit(1);
+    const record = await getActiveAdminApp(options.db, params.data.id);
     if (!record) return reply.code(404).send({ error: 'App not found' });
     const webhook = await getFirstWebhook(options.db, record.id);
     if (!webhook?.url || !webhook.enabled) return reply.code(400).send({ error: 'App webhook is not enabled' });
@@ -649,15 +657,18 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     const params = z.object({ id: z.string().uuid(), keyId: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid app or key id' });
 
+    const record = await getActiveAdminApp(options.db, params.data.id);
+    if (!record) return reply.code(404).send({ error: 'App not found' });
+
     const [revoked] = await options.db.update(appApiKeys).set({
       revokedAt: new Date(),
       updatedAt: new Date()
-    }).where(and(eq(appApiKeys.id, params.data.keyId), eq(appApiKeys.appId, params.data.id))).returning();
+    }).where(and(eq(appApiKeys.id, params.data.keyId), eq(appApiKeys.appId, record.id))).returning();
 
     if (!revoked) return reply.code(404).send({ error: 'API key not found' });
 
     await audit(options.db, 'app_api_key.revoke', 'app_api_key', revoked.id, {
-      appId: params.data.id,
+      appId: record.id,
       keyPrefix: revoked.keyPrefix
     });
 
