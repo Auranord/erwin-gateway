@@ -226,7 +226,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
   app.get('/api/admin/apps', async (_request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;
 
-    const records = await options.db.select().from(apps).orderBy(apps.slug);
+    const records = await options.db.select().from(apps).where(isNull(apps.archivedAt)).orderBy(apps.slug);
     const appIds = records.map((record) => record.id);
     const [keys, webhooks] = await Promise.all([
       appIds.length ? options.db.select().from(appApiKeys).orderBy(desc(appApiKeys.createdAt)) : Promise.resolve([]),
