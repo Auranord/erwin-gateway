@@ -78,6 +78,15 @@ type RegisteredApp = {
   webhook: Webhook;
 };
 
+type AppEditForm = {
+  name: string;
+  slug: string;
+  description: string;
+  permissions: string[];
+  webhookUrl: string;
+  webhookEventFilters: string;
+};
+
 const pages = [
   'Dashboard',
   'Twitch Setup',
@@ -119,6 +128,17 @@ function splitCsv(value: string) {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function appToEditForm(app: RegisteredApp): AppEditForm {
+  return {
+    name: app.name,
+    slug: app.slug,
+    description: app.description ?? '',
+    permissions: app.permissions,
+    webhookUrl: app.webhook.url,
+    webhookEventFilters: app.webhook.eventFilters.join(',')
+  };
+}
+
 function App() {
   const [apps, setApps] = useState<RegisteredApp[]>([]);
   const [permissions, setPermissions] = useState<string[]>(fallbackPermissions);
@@ -152,6 +172,7 @@ function App() {
     webhookUrl: '',
     webhookEventFilters: ''
   });
+  const [appEditForms, setAppEditForms] = useState<Record<string, AppEditForm>>({});
 
   const activeApps = useMemo(() => apps.filter((app) => app.enabled).length, [apps]);
   const hatcheryAppId = useMemo(() => apps.find((app) => app.slug === 'erwin-hatchery')?.id ?? '', [apps]);
@@ -400,6 +421,41 @@ function App() {
     await loadApps();
   }
 
+  function beginAppEdit(app: RegisteredApp) {
+    setError(null);
+    setAppEditForms((current) => ({ ...current, [app.id]: appToEditForm(app) }));
+  }
+
+  function cancelAppEdit(appId: string) {
+    setAppEditForms((current) => {
+      const { [appId]: _discarded, ...remaining } = current;
+      return remaining;
+    });
+  }
+
+  function updateAppEditField(appId: string, field: keyof AppEditForm, value: string | string[]) {
+    setAppEditForms((current) => {
+      const editForm = current[appId];
+      if (!editForm) return current;
+      return { ...current, [appId]: { ...editForm, [field]: value } };
+    });
+  }
+
+  function toggleAppEditPermission(appId: string, permission: string) {
+    setAppEditForms((current) => {
+      const editForm = current[appId];
+      if (!editForm) return current;
+      const nextPermissions = editForm.permissions.includes(permission)
+        ? editForm.permissions.filter((currentPermission) => currentPermission !== permission)
+        : [...editForm.permissions, permission];
+      return { ...current, [appId]: { ...editForm, permissions: nextPermissions } };
+    });
+  }
+
+  function validateAppEditPermissions(editForm: AppEditForm) {
+    return editForm.permissions.filter((permission) => !permissions.includes(permission));
+  }
+
   async function updateApp(app: RegisteredApp, patch: Partial<RegisteredApp> & { webhookUrl?: string; webhookEventFilters?: string[] }) {
     const response = await fetch(`/api/admin/apps/${app.id}`, {
       method: 'PATCH',
@@ -408,6 +464,26 @@ function App() {
     });
     if (!response.ok) throw new Error(`Update app failed with ${response.status}`);
     await loadApps();
+  }
+
+  async function saveAppEdit(app: RegisteredApp) {
+    const editForm = appEditForms[app.id];
+    if (!editForm) return;
+
+    const invalidPermissions = validateAppEditPermissions(editForm);
+    if (invalidPermissions.length > 0) {
+      throw new Error(`Invalid permissions: ${invalidPermissions.join(', ')}`);
+    }
+
+    await updateApp(app, {
+      name: editForm.name,
+      slug: editForm.slug,
+      description: editForm.description,
+      permissions: editForm.permissions,
+      webhookUrl: editForm.webhookUrl,
+      webhookEventFilters: splitCsv(editForm.webhookEventFilters)
+    });
+    cancelAppEdit(app.id);
   }
 
   async function archiveApp(app: RegisteredApp) {
@@ -591,54 +667,87 @@ function App() {
           </div>
 
           <div className="app-list">
-            {apps.map((registeredApp) => (
-              <article className={registeredApp.enabled ? 'app-card' : 'app-card archived'} key={registeredApp.id}>
-                <div className="app-card-header">
-                  <div>
-                    <h3>{registeredApp.name}</h3>
-                    <p>{registeredApp.slug} · {registeredApp.description ?? 'No description'}</p>
-                  </div>
-                  <div className="app-actions">
-                    <button onClick={() => void updateApp(registeredApp, { enabled: !registeredApp.enabled }).catch((updateError) => setError(String(updateError)))}>
-                      {registeredApp.enabled ? 'Disable' : 'Enable'}
-                    </button>
-                    <button className="destructive" onClick={() => void archiveApp(registeredApp).catch((archiveError) => setError(String(archiveError)))}>Archive</button>
-                  </div>
-                </div>
+            {apps.map((registeredApp) => {
+              const editForm = appEditForms[registeredApp.id];
+              const invalidEditPermissions = editForm ? validateAppEditPermissions(editForm) : [];
 
-                <div className="chips">{registeredApp.permissions.map((permission) => <span key={permission}>{permission}</span>)}</div>
-
-                <div className="webhook-row">
-                  <label>Webhook URL placeholder
-                    <input defaultValue={registeredApp.webhook.url} onBlur={(event) => void updateApp(registeredApp, { webhookUrl: event.target.value }).catch((updateError) => setError(String(updateError)))} />
-                  </label>
-                  <label>Event filters
-                    <input defaultValue={registeredApp.webhook.eventFilters.join(',')} onBlur={(event) => void updateApp(registeredApp, { webhookEventFilters: splitCsv(event.target.value) }).catch((updateError) => setError(String(updateError)))} />
-                  </label>
-                </div>
-
-                <div className="delivery-status">
-                  <span>Delivery status: {registeredApp.webhook.enabled ? `enabled · last ${registeredApp.webhook.lastDeliveryAt ?? 'never'}` : 'disabled'}</span>
-                  <button onClick={() => void rotateWebhookSecret(registeredApp.id).catch((secretError) => setError(String(secretError)))}>Rotate signing secret</button>
-                  <button onClick={() => void testAppWebhook(registeredApp.id).catch((testError) => setError(String(testError)))}>Send test webhook</button>
-                </div>
-
-                <div className="keys-heading">
-                  <strong>API keys</strong>
-                  <button onClick={() => void generateKey(registeredApp).catch((keyError) => setError(String(keyError)))}>Generate API key</button>
-                </div>
-                <div className="key-list">
-                  {registeredApp.apiKeys.map((key) => (
-                    <div className={key.revokedAt ? 'key revoked' : 'key'} key={key.id}>
-                      <span><strong>{key.name}</strong> <code>{key.keyPrefix}</code></span>
-                      <span>last used {key.lastUsedAt ?? 'never'}</span>
-                      {key.revokedAt ? <span>revoked</span> : <button onClick={() => void revokeKey(registeredApp, key).catch((revokeError) => setError(String(revokeError)))}>Revoke</button>}
+              return (
+                <article className={registeredApp.enabled ? 'app-card' : 'app-card archived'} key={registeredApp.id}>
+                  <div className="app-card-header">
+                    <div>
+                      <h3>{registeredApp.name}</h3>
+                      <p>{registeredApp.slug} · {registeredApp.description ?? 'No description'}</p>
                     </div>
-                  ))}
-                  {registeredApp.apiKeys.length === 0 ? <p>No API keys yet.</p> : null}
-                </div>
-              </article>
-            ))}
+                    <div className="app-actions">
+                      {editForm ? (
+                        <>
+                          <button onClick={() => void saveAppEdit(registeredApp).catch((updateError) => setError(String(updateError)))} disabled={invalidEditPermissions.length > 0}>Save</button>
+                          <button onClick={() => cancelAppEdit(registeredApp.id)}>Cancel</button>
+                        </>
+                      ) : (
+                        <button onClick={() => beginAppEdit(registeredApp)}>Edit</button>
+                      )}
+                      <button onClick={() => void updateApp(registeredApp, { enabled: !registeredApp.enabled }).catch((updateError) => setError(String(updateError)))}>
+                        {registeredApp.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                      <button className="destructive" onClick={() => void archiveApp(registeredApp).catch((archiveError) => setError(String(archiveError)))}>Archive</button>
+                    </div>
+                  </div>
+
+                  {editForm ? (
+                    <div className="app-edit-form">
+                      <div className="app-edit-grid">
+                        <label>Name<input value={editForm.name} onChange={(event) => updateAppEditField(registeredApp.id, 'name', event.target.value)} /></label>
+                        <label>Slug<input value={editForm.slug} onChange={(event) => updateAppEditField(registeredApp.id, 'slug', event.target.value)} /></label>
+                        <label>Description<input value={editForm.description} onChange={(event) => updateAppEditField(registeredApp.id, 'description', event.target.value)} /></label>
+                        <label>Webhook URL placeholder<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="https://app.example/webhooks/erwin" /></label>
+                        <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="chat.message,channel_points.redemption" /></label>
+                      </div>
+                      <fieldset className="permission-picker">
+                        <legend>Permissions</legend>
+                        {permissions.map((permission) => (
+                          <label className="checkbox-label" key={permission}>
+                            <input type="checkbox" checked={editForm.permissions.includes(permission)} onChange={() => toggleAppEditPermission(registeredApp.id, permission)} />
+                            {permission}
+                          </label>
+                        ))}
+                      </fieldset>
+                      {invalidEditPermissions.length > 0 ? <p className="error">Remove invalid permissions before saving: {invalidEditPermissions.join(', ')}</p> : null}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="chips">{registeredApp.permissions.map((permission) => <span key={permission}>{permission}</span>)}</div>
+
+                      <div className="webhook-summary">
+                        <p><strong>Webhook URL placeholder:</strong> {registeredApp.webhook.url || 'Not configured'}</p>
+                        <p><strong>Event filters:</strong> {registeredApp.webhook.eventFilters.length > 0 ? registeredApp.webhook.eventFilters.join(', ') : 'All deliverable events'}</p>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="delivery-status">
+                    <span>Delivery status: {registeredApp.webhook.enabled ? `enabled · last ${registeredApp.webhook.lastDeliveryAt ?? 'never'}` : 'disabled'}</span>
+                    <button onClick={() => void rotateWebhookSecret(registeredApp.id).catch((secretError) => setError(String(secretError)))}>Rotate signing secret</button>
+                    <button onClick={() => void testAppWebhook(registeredApp.id).catch((testError) => setError(String(testError)))}>Send test webhook</button>
+                  </div>
+
+                  <div className="keys-heading">
+                    <strong>API keys</strong>
+                    <button onClick={() => void generateKey(registeredApp).catch((keyError) => setError(String(keyError)))}>Generate API key</button>
+                  </div>
+                  <div className="key-list">
+                    {registeredApp.apiKeys.map((key) => (
+                      <div className={key.revokedAt ? 'key revoked' : 'key'} key={key.id}>
+                        <span><strong>{key.name}</strong> <code>{key.keyPrefix}</code></span>
+                        <span>last used {key.lastUsedAt ?? 'never'}</span>
+                        {key.revokedAt ? <span>revoked</span> : <button onClick={() => void revokeKey(registeredApp, key).catch((revokeError) => setError(String(revokeError)))}>Revoke</button>}
+                      </div>
+                    ))}
+                    {registeredApp.apiKeys.length === 0 ? <p>No API keys yet.</p> : null}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
 
