@@ -510,7 +510,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     title: z.string().min(1).max(45).optional(),
     cost: z.number().int().min(1).max(1_000_000_000).optional(),
     prompt: z.string().max(200).optional().nullable(),
-    owning_app_id: z.string().uuid().optional(),
+    owning_app_id: z.preprocess((value) => value === '' ? undefined : value, z.string().uuid().optional()),
     is_enabled: z.boolean().optional(),
     background_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
     is_user_input_required: z.boolean().optional(),
@@ -539,7 +539,8 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     const [owner] = body.data.owning_app_id
       ? await options.db.select().from(apps).where(eq(apps.id, body.data.owning_app_id)).limit(1)
       : await options.db.select().from(apps).where(eq(apps.slug, 'erwin-hatchery')).limit(1);
-    if (!owner) return reply.code(400).send({ error: 'An owning app is required for admin reward creation' });
+    if (!owner && body.data.owning_app_id) return reply.code(400).send({ error: 'Owning app not found for admin reward creation' });
+    if (!owner) return reply.code(400).send({ error: 'Select an owning app for admin reward creation; no owning_app_id was provided and default app erwin-hatchery was not found' });
     const ownerApp = { id: owner.id, slug: owner.slug, permissions: adminChannelPointApp.permissions };
     const result = await createReward(options.db, options.config, ownerApp, body.data);
     if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
