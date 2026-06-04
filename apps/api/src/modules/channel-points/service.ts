@@ -82,6 +82,9 @@ async function mutableReward(db: Database, app: AppIdentity, rewardId: string, p
   const denied = requirePermission(app, permission); if (denied) return denied;
   const [reward] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.id, rewardId)).limit(1);
   if (!reward || reward.deletedAt) return { ok: false as const, statusCode: 404, error: 'Reward not found' };
+  if ((permission === 'channel_points:rewards:update' || permission === 'channel_points:rewards:delete') && !reward.manageable) {
+    return { ok: false as const, statusCode: 409, error: 'Reward is not manageable by this Twitch client' };
+  }
   if (app.slug !== 'admin' && reward.owningAppId !== app.id) return { ok: false as const, statusCode: 403, error: 'Only the owning app can mutate this reward' };
   return { ok: true as const, reward };
 }

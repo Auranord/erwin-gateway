@@ -1080,8 +1080,8 @@ function App() {
                 <div><strong>{reward.title}</strong> <code>{reward.twitchRewardId}</code></div>
                 <p>cost {reward.cost} · owner {apps.find((app) => app.id === reward.owningAppId)?.slug ?? reward.owningAppId ?? 'unmapped'} · {reward.enabled ? 'enabled' : 'disabled'} · {reward.manageable ? 'manageable' : 'not manageable'}{reward.deletedAt ? ` · deleted ${new Date(reward.deletedAt).toLocaleString()}` : ''}</p>
                 <div className="button-row">
-                  <button disabled={Boolean(reward.deletedAt)} title={reward.deletedAt ? 'Deleted rewards cannot be updated on Twitch' : undefined} onClick={() => void updateChannelPointReward(reward, { is_enabled: !reward.enabled }).catch((updateError) => setError(String(updateError)))}>{reward.enabled ? 'Disable' : 'Enable'}</button>
-                  <button disabled={Boolean(reward.deletedAt)} title={reward.deletedAt ? 'Deleted rewards cannot be deleted on Twitch' : undefined} onClick={() => void deleteChannelPointReward(reward).catch((deleteError) => setError(String(deleteError)))}>Delete</button>
+                  <button disabled={Boolean(reward.deletedAt) || !reward.manageable} title={reward.deletedAt ? 'Deleted rewards cannot be updated on Twitch' : !reward.manageable ? 'This reward was not created by this Twitch client and cannot be changed through the gateway.' : undefined} onClick={() => void updateChannelPointReward(reward, { is_enabled: !reward.enabled }).catch((updateError) => setError(String(updateError)))}>{reward.enabled ? 'Disable' : 'Enable'}</button>
+                  <button disabled={Boolean(reward.deletedAt) || !reward.manageable} title={reward.deletedAt ? 'Deleted rewards cannot be deleted on Twitch' : !reward.manageable ? 'This reward was not created by this Twitch client and cannot be changed through the gateway.' : undefined} onClick={() => void deleteChannelPointReward(reward).catch((deleteError) => setError(String(deleteError)))}>Delete</button>
                 </div>
               </article>
             ))}
