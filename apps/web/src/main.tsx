@@ -809,6 +809,7 @@ function App() {
             <article><h3>Last sync</h3><p>{JSON.stringify(channelPointDiagnostics?.lastRewardSync ?? null)}</p></article>
             <article><h3>Last redemption</h3><p>{JSON.stringify(channelPointDiagnostics?.lastRedemptionEvent ?? null)}</p></article>
             <article><h3>Missing ownership</h3><p>{channelPointDiagnostics?.twitchRewardsMissingOwnershipMapping ?? 0}</p></article>
+            <article><h3>Missing on Twitch</h3><p>{channelPointDiagnostics?.rewardsMissingOnTwitch ?? 0}</p></article>
           </div>
 
           <h3>Reward list</h3>

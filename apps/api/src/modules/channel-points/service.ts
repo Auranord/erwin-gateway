@@ -98,9 +98,14 @@ export async function syncRewards(db: Database, config: AppConfig, app: AppIdent
   try {
     const url = new URL(`${helix}/channel_points/custom_rewards`); url.searchParams.set('broadcaster_id', channel.broadcasterUserId); url.searchParams.set('only_manageable_rewards', 'false');
     const response = await twitchFetch(db, config, url); const rewards = Array.isArray(response.data) ? response.data : [];
+    const twitchRewardIds = new Set(rewards.map((reward: any) => String(reward.id)));
+    const activeLocalRewards = await db.select().from(twitchChannelPointRewards).where(and(eq(twitchChannelPointRewards.channelId, channel.id), isNull(twitchChannelPointRewards.deletedAt)));
+    const missingOnTwitch = activeLocalRewards.filter((reward) => !twitchRewardIds.has(reward.twitchRewardId));
+    const deletedAt = new Date();
+    for (const reward of missingOnTwitch) await db.update(twitchChannelPointRewards).set({ enabled: false, deletedAt, updatedAt: deletedAt }).where(eq(twitchChannelPointRewards.id, reward.id));
     let created = 0, updated = 0, missing = 0;
     for (const raw of rewards) { const result = await upsertReward(db, raw, channel.id, null); result.created ? created++ : updated++; if (!result.reward.owningAppId) missing++; }
-    const [updatedRun] = await db.update(rewardSyncRuns).set({ status: 'completed', rewardsSeen: rewards.length, rewardsCreated: created, rewardsUpdated: updated, rewardsMissingOwnership: missing, completedAt: new Date() }).where(eq(rewardSyncRuns.id, run.id)).returning();
+    const [updatedRun] = await db.update(rewardSyncRuns).set({ status: 'completed', rewardsSeen: rewards.length, rewardsCreated: created, rewardsUpdated: updated, rewardsMissingOwnership: missing, rewardsMissingOnTwitch: missingOnTwitch.length, completedAt: new Date() }).where(eq(rewardSyncRuns.id, run.id)).returning();
     return { ok: true as const, run: updatedRun ?? run, rewards: await db.select().from(twitchChannelPointRewards).where(isNull(twitchChannelPointRewards.deletedAt)).orderBy(twitchChannelPointRewards.title) };
   } catch (error) { const message = error instanceof Error ? error.message : String(error); await db.update(rewardSyncRuns).set({ status: 'failed', error: message, completedAt: new Date() }).where(eq(rewardSyncRuns.id, run.id)); throw error; }
 }
@@ -151,5 +156,5 @@ export async function channelPointDiagnostics(db: Database) {
   const [lastSync] = await db.select().from(rewardSyncRuns).orderBy(desc(rewardSyncRuns.startedAt)).limit(1);
   const [lastRedemption] = await db.select().from(twitchChannelPointRedemptions).orderBy(desc(twitchChannelPointRedemptions.updatedAt)).limit(1);
   const [missingOwnership] = await db.select({ value: sql<number>`count(*)` }).from(twitchChannelPointRewards).where(and(isNull(twitchChannelPointRewards.owningAppId), isNull(twitchChannelPointRewards.deletedAt)));
-  return { lastRewardSync: lastSync ?? null, lastRedemptionEvent: lastRedemption ?? null, twitchRewardsMissingOwnershipMapping: Number(missingOwnership?.value ?? 0), rewardsMissingOnTwitch: 0, notes: ['rewardsMissingOnTwitch is verified by running reward sync against Twitch'] };
+  return { lastRewardSync: lastSync ?? null, lastRedemptionEvent: lastRedemption ?? null, twitchRewardsMissingOwnershipMapping: Number(missingOwnership?.value ?? 0), rewardsMissingOnTwitch: lastSync?.rewardsMissingOnTwitch ?? 0, notes: ['rewardsMissingOnTwitch is populated from the latest reward sync reconciliation'] };
 }
