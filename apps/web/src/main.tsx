@@ -160,22 +160,21 @@ function App() {
   const [channelPointRewards, setChannelPointRewards] = useState<ChannelPointReward[]>([]);
   const [channelPointRedemptions, setChannelPointRedemptions] = useState<ChannelPointRedemption[]>([]);
   const [channelPointDiagnostics, setChannelPointDiagnostics] = useState<ChannelPointDiagnostics | null>(null);
-  const [rewardForm, setRewardForm] = useState({ title: 'Hatchery Reward', cost: 1000, prompt: 'Redeem a Hatchery reward', owning_app_id: '', is_enabled: true });
-  const [commandForm, setCommandForm] = useState({ command: 'dc', aliases: 'discord', responseText: 'Join the Discord: https://discord.gg/example', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
+  const [rewardForm, setRewardForm] = useState({ title: '', cost: '', prompt: '', owning_app_id: '', is_enabled: true });
+  const [commandForm, setCommandForm] = useState({ command: '', aliases: '', responseText: '', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
   const [form, setForm] = useState({
-    name: 'My Downstream App',
-    slug: 'my-downstream-app',
-    description: 'Downstream app integration',
-    permissions: 'chat:messages:send,streams:read,logs:read_own',
+    name: '',
+    slug: '',
+    description: '',
+    permissions: '',
     webhookUrl: '',
     webhookEventFilters: ''
   });
   const [appEditForms, setAppEditForms] = useState<Record<string, AppEditForm>>({});
 
   const activeApps = useMemo(() => apps.filter((app) => app.enabled).length, [apps]);
-  const hatcheryAppId = useMemo(() => apps.find((app) => app.slug === 'erwin-hatchery')?.id ?? '', [apps]);
 
   function adminHeaders(extraHeaders: Record<string, string> = {}) {
     return adminKey ? { ...extraHeaders, 'X-Admin-API-Key': adminKey } : extraHeaders;
@@ -221,10 +220,6 @@ function App() {
     }
   }
 
-  useEffect(() => {
-    if (!hatcheryAppId) return;
-    setRewardForm((current) => current.owning_app_id ? current : { ...current, owning_app_id: hatcheryAppId });
-  }, [hatcheryAppId]);
 
   useEffect(() => {
     void loadApps();
@@ -304,7 +299,22 @@ function App() {
   }
 
   async function createChannelPointReward() {
-    const response = await fetch('/api/admin/channel-points/rewards', { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(rewardForm) });
+    const cost = Number(rewardForm.cost);
+    if (!rewardForm.title.trim()) throw new Error('Reward title is required');
+    if (!Number.isFinite(cost) || cost < 1) throw new Error('Reward cost must be at least 1');
+    if (!rewardForm.owning_app_id) throw new Error('Reward owning app is required');
+
+    const response = await fetch('/api/admin/channel-points/rewards', {
+      method: 'POST',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        title: rewardForm.title.trim(),
+        cost,
+        prompt: rewardForm.prompt.trim(),
+        owning_app_id: rewardForm.owning_app_id,
+        is_enabled: rewardForm.is_enabled
+      })
+    });
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       throw new Error(`Create reward failed with ${response.status}${payload?.error ? `: ${payload.error}` : ''}`);
@@ -346,13 +356,16 @@ function App() {
   }
 
   async function createTextCommand() {
+    if (!commandForm.command.trim()) throw new Error('Command name is required');
+    if (!commandForm.responseText.trim()) throw new Error('Response text is required');
+
     const response = await fetch('/api/admin/text-commands', {
       method: 'POST',
       headers: adminHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
-        command: commandForm.command,
+        command: commandForm.command.trim(),
         aliases: splitCsv(commandForm.aliases),
-        responseText: commandForm.responseText,
+        responseText: commandForm.responseText.trim(),
         enabled: commandForm.enabled,
         requiredRole: commandForm.requiredRole,
         cooldownSeconds: Number(commandForm.cooldownSeconds),
@@ -405,15 +418,18 @@ function App() {
 
 
   async function createApp() {
+    if (!form.name.trim()) throw new Error('App name is required');
+    if (!form.slug.trim()) throw new Error('App slug is required');
+
     const response = await fetch('/api/admin/apps', {
       method: 'POST',
       headers: adminHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
-        name: form.name,
-        slug: form.slug,
-        description: form.description,
+        name: form.name.trim(),
+        slug: form.slug.trim(),
+        description: form.description.trim(),
         permissions: splitCsv(form.permissions),
-        webhookUrl: form.webhookUrl,
+        webhookUrl: form.webhookUrl.trim(),
         webhookEventFilters: splitCsv(form.webhookEventFilters)
       })
     });
@@ -652,12 +668,12 @@ function App() {
           ) : null}
 
           <form className="create-form" onSubmit={(event) => { event.preventDefault(); void createApp().catch((createError) => setError(String(createError))); }}>
-            <label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-            <label>Slug<input value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} /></label>
-            <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-            <label>Permissions<input value={form.permissions} onChange={(event) => setForm({ ...form, permissions: event.target.value })} /></label>
-            <label>Webhook URL placeholder<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="https://app.example/webhooks/erwin" /></label>
-            <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="chat.message,channel_points.redemption" /></label>
+            <label>Name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Example: Erwin Hatchery" /></label>
+            <label>Slug<input required value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="Example: erwin-hatchery" /></label>
+            <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Example: Hatchery reward integration" /></label>
+            <label>Permissions<input value={form.permissions} onChange={(event) => setForm({ ...form, permissions: event.target.value })} placeholder="Example: chat:messages:send,streams:read" /></label>
+            <label>Webhook URL placeholder<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="Example: https://app.example/webhooks/erwin" /></label>
+            <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: chat.message,channel_points.redemption" /></label>
             <button type="submit">Create app</button>
           </form>
 
@@ -700,8 +716,8 @@ function App() {
                         <label>Name<input value={editForm.name} onChange={(event) => updateAppEditField(registeredApp.id, 'name', event.target.value)} /></label>
                         <label>Slug<input value={editForm.slug} onChange={(event) => updateAppEditField(registeredApp.id, 'slug', event.target.value)} /></label>
                         <label>Description<input value={editForm.description} onChange={(event) => updateAppEditField(registeredApp.id, 'description', event.target.value)} /></label>
-                        <label>Webhook URL placeholder<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="https://app.example/webhooks/erwin" /></label>
-                        <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="chat.message,channel_points.redemption" /></label>
+                        <label>Webhook URL placeholder<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="Example: https://app.example/webhooks/erwin" /></label>
+                        <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="Example: chat.message,channel_points.redemption" /></label>
                       </div>
                       <fieldset className="permission-picker">
                         <legend>Permissions</legend>
@@ -768,9 +784,9 @@ function App() {
           </form>
 
           <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void createTextCommand().catch((createError) => setError(String(createError))); }}>
-            <label>Command<input value={commandForm.command} onChange={(event) => setCommandForm({ ...commandForm, command: event.target.value })} placeholder="dc" /></label>
-            <label>Aliases<input value={commandForm.aliases} onChange={(event) => setCommandForm({ ...commandForm, aliases: event.target.value })} placeholder="discord,youtube" /></label>
-            <label>Response text<textarea value={commandForm.responseText} onChange={(event) => setCommandForm({ ...commandForm, responseText: event.target.value })} /></label>
+            <label>Command<input required value={commandForm.command} onChange={(event) => setCommandForm({ ...commandForm, command: event.target.value })} placeholder="Example: dc" /></label>
+            <label>Aliases<input value={commandForm.aliases} onChange={(event) => setCommandForm({ ...commandForm, aliases: event.target.value })} placeholder="Example: discord,youtube" /></label>
+            <label>Response text<textarea required value={commandForm.responseText} onChange={(event) => setCommandForm({ ...commandForm, responseText: event.target.value })} placeholder="Example: Join the Discord: https://discord.gg/example" /></label>
             <label>Required role<select value={commandForm.requiredRole} onChange={(event) => setCommandForm({ ...commandForm, requiredRole: event.target.value })}>{['everyone', 'subscriber', 'vip', 'moderator', 'broadcaster'].map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
             <label>Global cooldown seconds<input type="number" min="0" value={commandForm.cooldownSeconds} onChange={(event) => setCommandForm({ ...commandForm, cooldownSeconds: Number(event.target.value) })} /></label>
             <label>User cooldown seconds<input type="number" min="0" value={commandForm.userCooldownSeconds} onChange={(event) => setCommandForm({ ...commandForm, userCooldownSeconds: Number(event.target.value) })} /></label>
@@ -955,9 +971,9 @@ function App() {
           </div>
 
           <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void createChannelPointReward().catch((createError) => setError(String(createError))); }}>
-            <label>Title<input value={rewardForm.title} onChange={(event) => setRewardForm({ ...rewardForm, title: event.target.value })} /></label>
-            <label>Cost<input type="number" min="1" value={rewardForm.cost} onChange={(event) => setRewardForm({ ...rewardForm, cost: Number(event.target.value) })} /></label>
-            <label>Prompt<textarea value={rewardForm.prompt} onChange={(event) => setRewardForm({ ...rewardForm, prompt: event.target.value })} /></label>
+            <label>Title<input required value={rewardForm.title} onChange={(event) => setRewardForm({ ...rewardForm, title: event.target.value })} placeholder="Example: hatchery-reward" /></label>
+            <label>Cost<input required type="number" min="1" value={rewardForm.cost} onChange={(event) => setRewardForm({ ...rewardForm, cost: event.target.value })} placeholder="Example: 1000" /></label>
+            <label>Prompt<textarea value={rewardForm.prompt} onChange={(event) => setRewardForm({ ...rewardForm, prompt: event.target.value })} placeholder="Example: Redeem a Hatchery reward" /></label>
             <label>Owning app<select required value={rewardForm.owning_app_id} onChange={(event) => setRewardForm({ ...rewardForm, owning_app_id: event.target.value })}>
               <option value="">Select an owning app</option>
               {apps.map((registeredApp) => <option key={registeredApp.id} value={registeredApp.id}>{registeredApp.slug} — {registeredApp.name}</option>)}
