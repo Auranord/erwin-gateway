@@ -382,24 +382,29 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
 
   app.get('/api/v1/webhook-deliveries', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
     if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
     const query = z.object({ status: z.string().optional(), limit: z.coerce.number().int().positive().optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: 'Invalid query', issues: query.error.issues });
-    return { deliveries: await listWebhookDeliveries(options.db, query.data) };
+    return { deliveries: await listWebhookDeliveries(options.db, { ...query.data, appId: authenticatedApp.id }) };
   });
 
   app.get('/api/v1/webhook-deliveries/:deliveryId', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
     if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
     const params = z.object({ deliveryId: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid delivery id' });
     const result = await getWebhookDeliveryWithAttempts(options.db, params.data.deliveryId);
-    if (!result) return reply.code(404).send({ error: 'Delivery not found' });
+    if (!result || result.delivery.appId !== authenticatedApp.id) return reply.code(404).send({ error: 'Delivery not found' });
     return result;
   });
 
   app.post('/api/v1/webhook-deliveries/:deliveryId/retry', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
     if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
+    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
     const params = z.object({ deliveryId: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid delivery id' });
+    const result = await getWebhookDeliveryWithAttempts(options.db, params.data.deliveryId);
+    if (!result || result.delivery.appId !== authenticatedApp.id) return reply.code(404).send({ error: 'Delivery not found' });
     const delivery = await deliverWebhookNow(options.db, params.data.deliveryId, true);
     if (!delivery) return reply.code(404).send({ error: 'Delivery not found' });
     return { delivery };

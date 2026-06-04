@@ -168,7 +168,18 @@ export async function listChatLog(db: Database, query: { q?: string; command?: s
   if (query.command) clauses.push(eq(twitchChatMessages.commandName, query.command.toLowerCase()));
   return db.select().from(twitchChatMessages).where(clauses.length ? and(...clauses) : undefined).orderBy(desc(twitchChatMessages.createdAt)).limit(Math.min(query.limit ?? 100, 500));
 }
-export async function listWebhookDeliveries(db: Database, query: { status?: string; limit?: number }) { return db.select().from(webhookDeliveries).where(query.status ? eq(webhookDeliveries.status, query.status) : undefined).orderBy(desc(webhookDeliveries.createdAt)).limit(Math.min(query.limit ?? 100, 500)); }
+export async function listWebhookDeliveries(db: Database, query: { status?: string; limit?: number; appId?: string }) {
+  const clauses = [];
+  if (query.status) clauses.push(eq(webhookDeliveries.status, query.status));
+  if (query.appId) clauses.push(eq(webhookDeliveries.appId, query.appId));
+
+  return db
+    .select()
+    .from(webhookDeliveries)
+    .where(clauses.length ? and(...clauses) : undefined)
+    .orderBy(desc(webhookDeliveries.createdAt))
+    .limit(Math.min(query.limit ?? 100, 500));
+}
 export async function getWebhookDeliveryWithAttempts(db: Database, id: string) {
   const [delivery] = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, id)).limit(1);
   if (!delivery) return null;
