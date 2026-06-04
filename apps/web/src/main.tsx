@@ -89,6 +89,8 @@ type AppEditForm = {
   webhookEventFilters: string;
 };
 
+type AdminAuthStatus = 'unknown' | 'locked' | 'validating' | 'authenticated';
+
 const pages = [
   'Dashboard',
   'Twitch Setup',
@@ -170,6 +172,7 @@ function App() {
   const [commandForm, setCommandForm] = useState({ command: '', aliases: '', responseText: '', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
+  const [adminAuthStatus, setAdminAuthStatus] = useState<AdminAuthStatus>('unknown');
   const [form, setForm] = useState({
     name: '',
     slug: '',
@@ -188,10 +191,34 @@ function App() {
 
   function saveAdminKey(value: string) {
     setAdminKey(value);
+    setAdminAuthStatus('locked');
     if (value) {
       window.localStorage.setItem('erwinGatewayAdminKey', value);
     } else {
       window.localStorage.removeItem('erwinGatewayAdminKey');
+    }
+  }
+
+  async function validateAdminKey() {
+    if (!adminKey.trim()) {
+      setAdminAuthStatus('locked');
+      setError('Enter an Admin API key before loading operations.');
+      setLoading(false);
+      return;
+    }
+
+    setAdminAuthStatus('validating');
+    setError(null);
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/admin/shell', { headers: adminHeaders() });
+      if (!response.ok) throw new Error(`Admin API key validation failed with ${response.status}`);
+      setAdminAuthStatus('authenticated');
+    } catch (validationError) {
+      setAdminAuthStatus('locked');
+      setError(validationError instanceof Error ? validationError.message : 'Admin API key validation failed');
+      setLoading(false);
     }
   }
 
@@ -228,13 +255,24 @@ function App() {
 
 
   useEffect(() => {
+    if (adminKey) {
+      void validateAdminKey();
+    } else {
+      setAdminAuthStatus('locked');
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (adminAuthStatus !== 'authenticated') return;
+
     void loadApps();
     void loadTwitchStatus();
     void loadWebhookDeliveries().catch((loadError) => setError(String(loadError)));
     void loadTextCommands().catch((loadError) => setError(String(loadError)));
     void loadCommandPrefix().catch((loadError) => setError(String(loadError)));
     void loadChannelPoints().catch((loadError) => setError(String(loadError)));
-  }, []);
+  }, [adminAuthStatus]);
 
   async function loadChatLog(search = chatSearch, limit = chatLimit) {
     const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 50;
@@ -604,6 +642,20 @@ function App() {
     await loadApps();
   }
 
+  if (adminAuthStatus !== 'authenticated') {
+    return (
+      <main className="shell">
+        <form className="admin-auth page-card" aria-label="Admin API key" onSubmit={(event) => { event.preventDefault(); void validateAdminKey(); }}>
+          <label>Admin API key (stored locally in this browser)
+            <input type="password" value={adminKey} onChange={(event) => saveAdminKey(event.target.value)} placeholder="Required when INTERNAL_ADMIN_API_KEY is configured" />
+          </label>
+          <button type="submit" disabled={adminAuthStatus === 'validating'}>{adminAuthStatus === 'validating' ? 'Validating…' : 'Validate key'}</button>
+          {error ? <p className="error">{error}</p> : null}
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar" aria-label="Admin navigation">
@@ -624,11 +676,12 @@ function App() {
           </p>
         </header>
 
-        <section className="admin-auth page-card" aria-label="Admin API key">
+        <form className="admin-auth page-card" aria-label="Admin API key" onSubmit={(event) => { event.preventDefault(); void validateAdminKey(); }}>
           <label>Admin API key (stored locally in this browser)
             <input type="password" value={adminKey} onChange={(event) => saveAdminKey(event.target.value)} placeholder="Required when INTERNAL_ADMIN_API_KEY is configured" />
           </label>
-        </section>
+          <button type="submit">Validate key</button>
+        </form>
 
         <section className="status-card" aria-label="Gateway status summary">
           <span className="status-dot" />
