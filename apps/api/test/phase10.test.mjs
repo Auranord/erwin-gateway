@@ -349,6 +349,29 @@ test('Channel Point reward sync remains discovery-only and exposes ownership sta
   assert.match(serviceSource, /unowned/, 'responses must distinguish unowned rewards');
 });
 
+test('Channel Point reward creation accepts ownership metadata without sending it to Twitch', () => {
+  const appRoutesSource = readSource('modules/apps/routes.ts');
+  const serviceSource = readSource('modules/channel-points/service.ts');
+
+  assert.match(appRoutesSource, /const createRewardSchema = rewardPayloadSchema\.extend\(\{[\s\S]*app_ownership_key: z\.string\(\)\.min\(1\)\.max\(200\)\.optional\(\)[\s\S]*local_reward_type: z\.string\(\)\.min\(1\)\.max\(120\)\.optional\(\)/, 'create reward payload must accept bounded ownership metadata');
+  assert.match(serviceSource, /const body = \{ title: input\.title, cost: input\.cost[\s\S]*should_redemptions_skip_request_queue: input\.should_redemptions_skip_request_queue \}/, 'Twitch create payload must remain an explicit allow-list of Twitch fields');
+  const twitchBodyStart = serviceSource.indexOf('const body = { title: input.title, cost: input.cost');
+  const twitchBodyEnd = serviceSource.indexOf('const cleaned = Object.fromEntries', twitchBodyStart);
+  const twitchBodyBlock = serviceSource.slice(twitchBodyStart, twitchBodyEnd);
+  assert.doesNotMatch(twitchBodyBlock, /app_ownership_key|local_reward_type/, 'ownership metadata must not be forwarded to Twitch');
+  assert.match(serviceSource, /upsertReward\(db, raw, channel\.id, app\.id, \{ createResponse: true, appOwnershipKey: input\.app_ownership_key \?\? null \}\)/, 'created rewards must persist the requested app ownership key locally');
+  assert.doesNotMatch(serviceSource, /rawPayload:[^\n]*local_reward_type|local_reward_type[^\n]*rawPayload/, 'local reward type must not be mixed into Twitch raw payload metadata');
+});
+
+test('Hatchery-created Channel Point rewards serialize as app-owned and mutable', () => {
+  const serviceSource = readSource('modules/channel-points/service.ts');
+
+  assert.match(serviceSource, /return \{ \.\.\.reward, app_ownership_key: reward\.appOwnershipKey, ownershipStatus: status, canAdopt, canMutate \}/, 'reward responses must expose both appOwnershipKey and app_ownership_key');
+  assert.match(serviceSource, /function ownershipStatus\(reward: RewardRow, app: AppIdentity\) \{ return !reward\.owningAppId \? 'unowned' : reward\.owningAppId === app\.id \? 'owned_by_you' : 'owned_by_other'; \}/, 'rewards owned by the authenticated app must report owned_by_you');
+  assert.match(serviceSource, /const canMutate = !reward\.deletedAt && reward\.manageable && \(app\.slug === 'admin' \|\| status === 'owned_by_you'\)/, 'owned manageable rewards must be mutable by apps with mutation permissions');
+  assert.match(serviceSource, /normalizeReward[\s\S]*options\.createResponse[\s\S]*\? true/, 'Twitch create responses without is_manageable must still be treated as manageable locally');
+});
+
 test('Channel Point reward error bodies include machine-readable gateway and Twitch details', () => {
   const appRoutesSource = readSource('modules/apps/routes.ts');
   const appSource = readSource('app.ts');

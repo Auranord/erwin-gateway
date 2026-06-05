@@ -206,7 +206,7 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
     global_cooldown_seconds: z.number().int().positive().optional(),
     should_redemptions_skip_request_queue: z.boolean().optional()
   });
-  const createRewardSchema = rewardPayloadSchema.extend({ title: z.string().min(1).max(45), cost: z.number().int().min(1).max(1_000_000_000) });
+  const createRewardSchema = rewardPayloadSchema.extend({ title: z.string().min(1).max(45), cost: z.number().int().min(1).max(1_000_000_000), app_ownership_key: z.string().min(1).max(200).optional(), local_reward_type: z.string().min(1).max(120).optional() });
   const adoptRewardSchema = z.object({ app_ownership_key: z.string().min(1).max(200), expected_twitch_reward_id: z.string().min(1).optional(), local_reward_type: z.string().min(1).max(120).optional() });
 
   app.get('/api/v1/channel-points/rewards', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {

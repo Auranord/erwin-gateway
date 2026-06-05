@@ -17,12 +17,12 @@ export function serializeRewardForApp(reward: RewardRow, app: AppIdentity) {
   const status = ownershipStatus(reward, app);
   const canAdopt = !reward.deletedAt && reward.manageable && (status === 'unowned' || status === 'owned_by_you') && (has(app, 'channel_points:rewards:adopt') || has(app, 'channel_points:rewards:update'));
   const canMutate = !reward.deletedAt && reward.manageable && (app.slug === 'admin' || status === 'owned_by_you') && (has(app, 'channel_points:rewards:update') || has(app, 'channel_points:rewards:delete') || has(app, 'channel_points:redemptions:manage'));
-  return { ...reward, ownershipStatus: status, canAdopt, canMutate };
+  return { ...reward, app_ownership_key: reward.appOwnershipKey, ownershipStatus: status, canAdopt, canMutate };
 }
 function isoDate(value: unknown) { const date = typeof value === 'string' ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? new Date() : date; }
 function rewardLimits(raw: any) { return { max_per_stream: raw.max_per_stream_setting ?? null, max_per_user_per_stream: raw.max_per_user_per_stream_setting ?? null, global_cooldown: raw.global_cooldown_setting ?? null }; }
 type RewardRow = typeof twitchChannelPointRewards.$inferSelect;
-type NormalizeRewardOptions = { createResponse?: boolean; existingReward?: RewardRow | null };
+type NormalizeRewardOptions = { createResponse?: boolean; existingReward?: RewardRow | null; appOwnershipKey?: string | null };
 function normalizeReward(raw: any, channelId: string, ownerAppId?: string | null, options: NormalizeRewardOptions = {}) {
   const manageable = typeof raw.is_manageable === 'boolean'
     ? raw.is_manageable
@@ -33,7 +33,7 @@ function normalizeReward(raw: any, channelId: string, ownerAppId?: string | null
   return {
     twitchRewardId: String(raw.id), channelId, owningAppId: ownerAppId ?? null, title: String(raw.title ?? ''), cost: Number(raw.cost ?? 0), prompt: raw.prompt ?? null,
     enabled: Boolean(raw.is_enabled ?? raw.enabled ?? true), manageable,
-    backgroundColor: raw.background_color ?? null, isUserInputRequired: Boolean(raw.is_user_input_required ?? false), limits: rewardLimits(raw), rawPayload: raw, lastSyncedAt: new Date(), deletedAt: null
+    backgroundColor: raw.background_color ?? null, isUserInputRequired: Boolean(raw.is_user_input_required ?? false), limits: rewardLimits(raw), rawPayload: raw, appOwnershipKey: options.appOwnershipKey ?? null, lastSyncedAt: new Date(), deletedAt: null
   };
 }
 function normalizeRedemptionPayload(redemption: typeof twitchChannelPointRedemptions.$inferSelect, reward: typeof twitchChannelPointRewards.$inferSelect | null, eventType: string) {
@@ -69,7 +69,7 @@ async function upsertReward(db: Database, raw: any, channelId: string, ownerAppI
   const [existing] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.twitchRewardId, twitchRewardId)).limit(1);
   const values = normalizeReward(raw, channelId, ownerAppId, { ...options, existingReward: existing ?? null });
   const [reward] = existing
-    ? await db.update(twitchChannelPointRewards).set({ ...values, owningAppId: existing.owningAppId ?? values.owningAppId, appOwnershipKey: existing.appOwnershipKey, updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, existing.id)).returning()
+    ? await db.update(twitchChannelPointRewards).set({ ...values, owningAppId: existing.owningAppId ?? values.owningAppId, appOwnershipKey: existing.appOwnershipKey ?? values.appOwnershipKey, updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, existing.id)).returning()
     : await db.insert(twitchChannelPointRewards).values(values).returning();
   if (reward?.owningAppId) await db.insert(appChannelPointRewardBindings).values({ appId: reward.owningAppId, rewardId: reward.id, permission: 'owner' }).onConflictDoNothing();
   return { reward: reward!, created: !existing };
@@ -86,7 +86,7 @@ export async function createReward(db: Database, config: AppConfig, app: AppIden
   const cleaned = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));
   const response = await twitchFetch(db, config, url, { method: 'POST', body: JSON.stringify(cleaned) });
   const raw = response.data?.[0]; if (!raw) throw new Error('Twitch did not return created reward');
-  const { reward } = await upsertReward(db, raw, channel.id, app.id, { createResponse: true });
+  const { reward } = await upsertReward(db, raw, channel.id, app.id, { createResponse: true, appOwnershipKey: input.app_ownership_key ?? null });
   return { ok: true as const, statusCode: 201, reward: serializeRewardForApp(reward, app) };
 }
 export async function getReward(db: Database, app: AppIdentity, rewardId: string) {
