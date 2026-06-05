@@ -117,6 +117,20 @@ export async function buildApp(options: BuildAppOptions) {
     });
   }
 
+  app.setErrorHandler((error, _request, reply) => {
+    const enriched = error as Error & { statusCode?: number; code?: string; details?: unknown; twitchStatus?: number; twitchErrorExcerpt?: string };
+    const statusCode = enriched.statusCode && enriched.statusCode >= 400 && enriched.statusCode < 600 ? enriched.statusCode : 500;
+    const body = {
+      error: statusCode >= 500 && !enriched.code ? 'Internal Server Error' : enriched.message,
+      code: enriched.code ?? 'internal_error',
+      details: enriched.details ?? null,
+      ...(enriched.twitchStatus ? { twitchStatus: enriched.twitchStatus } : {}),
+      ...(enriched.twitchErrorExcerpt ? { twitchErrorExcerpt: enriched.twitchErrorExcerpt } : {})
+    };
+    if (statusCode >= 500) app.log.error({ err: error, code: body.code, twitchStatus: enriched.twitchStatus }, 'request failed');
+    return reply.code(statusCode).send(body);
+  });
+
   app.setNotFoundHandler((request, reply) => {
     if (hasWebDist && request.raw.method === 'GET' && isSpaRoute(request.url)) {
       return reply.sendFile('index.html');

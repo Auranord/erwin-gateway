@@ -317,3 +317,48 @@ test('EventSub ingress challenge/notification behaviors and raw-body validations
   assert.equal(invalidSignature.statusCode, 403);
   await app.close();
 });
+
+test('Channel Point reward adoption binding is explicit and safe', () => {
+  const serviceSource = readSource('modules/channel-points/service.ts');
+  const appRoutesSource = readSource('modules/apps/routes.ts');
+  const permissionsSource = readSource('modules/apps/permissions.ts');
+
+  assert.match(appRoutesSource, /\/api\/v1\/channel-points\/rewards\/:rewardId\/adopt/, 'first-class reward adoption endpoint must exist');
+  assert.match(appRoutesSource, /app_ownership_key/, 'adoption payload must require an app ownership key');
+  assert.match(permissionsSource, /channel_points:rewards:adopt/, 'adoption permission must be registered');
+  assert.match(serviceSource, /requireAnyPermission\(app, \['channel_points:rewards:adopt', 'channel_points:rewards:update'\]\)/, 'adoption must require adopt or update permission');
+  assert.match(serviceSource, /!reward \|\| reward\.deletedAt/, 'adoption must reject missing or deleted rewards');
+  assert.match(serviceSource, /expected_twitch_reward_id[\s\S]*expected_twitch_reward_id_mismatch/, 'adoption must validate expected Twitch reward ids');
+  assert.match(serviceSource, /!reward\.manageable[\s\S]*reward_not_manageable/, 'adoption must reject rewards not manageable by this Twitch client');
+  assert.match(serviceSource, /reward\.owningAppId && reward\.owningAppId !== app\.id[\s\S]*reward_owned_by_other_app/, 'adoption must reject rewards owned by another app with a conflict code');
+  assert.match(serviceSource, /owningAppId: app\.id, appOwnershipKey: input\.app_ownership_key/, 'adoption must bind owner and ownership key');
+  assert.match(serviceSource, /appChannelPointRewardBindings[\s\S]*permission: 'owner'[\s\S]*onConflictDoUpdate/, 'adoption must upsert owner reward binding idempotently');
+  assert.match(serviceSource, /channel_points\.reward\.adopt/, 'adoption must be audited');
+});
+
+test('Channel Point reward sync remains discovery-only and exposes ownership state', () => {
+  const serviceSource = readSource('modules/channel-points/service.ts');
+
+  assert.match(serviceSource, /for \(const raw of rewards\)[\s\S]*upsertReward\(db, raw, channel\.id, null\)/, 'sync must discover rewards without silently assigning the requester as owner');
+  assert.match(serviceSource, /owningAppId: existing\.owningAppId \?\? values\.owningAppId, appOwnershipKey: existing\.appOwnershipKey/, 'sync must preserve existing ownership and app ownership keys');
+  for (const field of ['ownershipStatus', 'canAdopt', 'canMutate']) {
+    assert.match(serviceSource, new RegExp(field), `serialized reward responses must include ${field}`);
+  }
+  assert.match(serviceSource, /owned_by_you/, 'responses must distinguish rewards owned by the caller');
+  assert.match(serviceSource, /owned_by_other/, 'responses must distinguish rewards owned by another app');
+  assert.match(serviceSource, /unowned/, 'responses must distinguish unowned rewards');
+});
+
+test('Channel Point reward error bodies include machine-readable gateway and Twitch details', () => {
+  const appRoutesSource = readSource('modules/apps/routes.ts');
+  const appSource = readSource('app.ts');
+  const serviceSource = readSource('modules/channel-points/service.ts');
+
+  assert.match(appRoutesSource, /function gatewayErrorBody/, 'app routes must format gateway error bodies consistently');
+  for (const field of ['error', 'code', 'details', 'twitchStatus', 'twitchErrorExcerpt']) {
+    assert.match(appRoutesSource + appSource, new RegExp(field), `gateway errors must include ${field} when available`);
+  }
+  assert.match(serviceSource, /error\.code = 'twitch_api_error'/, 'Twitch API errors must carry a stable code');
+  assert.match(serviceSource, /error\.twitchStatus = response\.status/, 'Twitch API errors must expose HTTP status without secrets');
+  assert.match(serviceSource, /text\.slice\(0, 500\)/, 'Twitch API errors must limit safe excerpts');
+});

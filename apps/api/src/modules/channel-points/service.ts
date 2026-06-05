@@ -10,7 +10,15 @@ export const redemptionStatuses = ['UNFULFILLED', 'FULFILLED', 'CANCELED'] as co
 const helix = 'https://api.twitch.tv/helix';
 
 function has(app: AppIdentity, permission: string) { return app.permissions.includes(permission); }
-function requirePermission(app: AppIdentity, permission: string) { if (!has(app, permission)) return { ok: false as const, statusCode: 403, error: `App is missing ${permission} permission` }; return null; }
+function requirePermission(app: AppIdentity, permission: string) { if (!has(app, permission)) return { ok: false as const, statusCode: 403, error: `App is missing ${permission} permission`, code: 'missing_permission', details: { permission } }; return null; }
+function requireAnyPermission(app: AppIdentity, permissions: string[]) { if (!permissions.some((permission) => has(app, permission))) return { ok: false as const, statusCode: 403, error: `App is missing one of: ${permissions.join(', ')}`, code: 'missing_permission', details: { permissions } }; return null; }
+function ownershipStatus(reward: RewardRow, app: AppIdentity) { return !reward.owningAppId ? 'unowned' : reward.owningAppId === app.id ? 'owned_by_you' : 'owned_by_other'; }
+export function serializeRewardForApp(reward: RewardRow, app: AppIdentity) {
+  const status = ownershipStatus(reward, app);
+  const canAdopt = !reward.deletedAt && reward.manageable && (status === 'unowned' || status === 'owned_by_you') && (has(app, 'channel_points:rewards:adopt') || has(app, 'channel_points:rewards:update'));
+  const canMutate = !reward.deletedAt && reward.manageable && (app.slug === 'admin' || status === 'owned_by_you') && (has(app, 'channel_points:rewards:update') || has(app, 'channel_points:rewards:delete') || has(app, 'channel_points:redemptions:manage'));
+  return { ...reward, ownershipStatus: status, canAdopt, canMutate };
+}
 function isoDate(value: unknown) { const date = typeof value === 'string' ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? new Date() : date; }
 function rewardLimits(raw: any) { return { max_per_stream: raw.max_per_stream_setting ?? null, max_per_user_per_stream: raw.max_per_user_per_stream_setting ?? null, global_cooldown: raw.global_cooldown_setting ?? null }; }
 type RewardRow = typeof twitchChannelPointRewards.$inferSelect;
@@ -41,11 +49,19 @@ function normalizeRedemptionPayload(redemption: typeof twitchChannelPointRedempt
 async function primaryChannel(db: Database) { const [channel] = await db.select().from(twitchChannels).where(eq(twitchChannels.enabled, true)).limit(1); if (!channel) throw new Error('No Twitch channel is configured'); return channel; }
 async function twitchFetch(db: Database, config: AppConfig, url: URL, init: RequestInit = {}) {
   const token = await getUserAccessToken(db, config, 'broadcaster');
-  if (!token.scopes.includes('channel:manage:redemptions')) throw new Error('Broadcaster token is missing channel:manage:redemptions');
+  if (!token.scopes.includes('channel:manage:redemptions')) {
+    const error = new Error('Broadcaster token is missing channel:manage:redemptions') as Error & { code?: string; statusCode?: number; details?: unknown };
+    error.code = 'missing_twitch_scope'; error.statusCode = 503; error.details = { scope: 'channel:manage:redemptions' };
+    throw error;
+  }
   const response = await fetch(url, { ...init, headers: { 'Client-Id': config.TWITCH_CLIENT_ID ?? '', Authorization: `Bearer ${token.accessToken}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
   const text = await response.text();
   const body = text ? JSON.parse(text) : {};
-  if (!response.ok) throw new Error(`Twitch API ${url.pathname} failed with ${response.status}: ${text.slice(0, 500)}`);
+  if (!response.ok) {
+    const error = new Error(`Twitch API ${url.pathname} failed with ${response.status}`) as Error & { code?: string; statusCode?: number; details?: unknown; twitchStatus?: number; twitchErrorExcerpt?: string };
+    error.code = 'twitch_api_error'; error.statusCode = response.status >= 500 ? 502 : 400; error.details = { path: url.pathname, method: init.method ?? 'GET' }; error.twitchStatus = response.status; error.twitchErrorExcerpt = text.slice(0, 500);
+    throw error;
+  }
   return body;
 }
 async function upsertReward(db: Database, raw: any, channelId: string, ownerAppId?: string | null, options: Omit<NormalizeRewardOptions, 'existingReward'> = {}) {
@@ -53,14 +69,15 @@ async function upsertReward(db: Database, raw: any, channelId: string, ownerAppI
   const [existing] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.twitchRewardId, twitchRewardId)).limit(1);
   const values = normalizeReward(raw, channelId, ownerAppId, { ...options, existingReward: existing ?? null });
   const [reward] = existing
-    ? await db.update(twitchChannelPointRewards).set({ ...values, owningAppId: existing.owningAppId ?? values.owningAppId, updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, existing.id)).returning()
+    ? await db.update(twitchChannelPointRewards).set({ ...values, owningAppId: existing.owningAppId ?? values.owningAppId, appOwnershipKey: existing.appOwnershipKey, updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, existing.id)).returning()
     : await db.insert(twitchChannelPointRewards).values(values).returning();
   if (reward?.owningAppId) await db.insert(appChannelPointRewardBindings).values({ appId: reward.owningAppId, rewardId: reward.id, permission: 'owner' }).onConflictDoNothing();
   return { reward: reward!, created: !existing };
 }
 export async function listRewards(db: Database, app: AppIdentity, query: { includeDeleted?: boolean }) {
   const denied = requirePermission(app, 'channel_points:rewards:read'); if (denied) return denied;
-  return { ok: true as const, rewards: await db.select().from(twitchChannelPointRewards).where(query.includeDeleted ? undefined : isNull(twitchChannelPointRewards.deletedAt)).orderBy(twitchChannelPointRewards.title) };
+  const rewards = await db.select().from(twitchChannelPointRewards).where(query.includeDeleted ? undefined : isNull(twitchChannelPointRewards.deletedAt)).orderBy(twitchChannelPointRewards.title);
+  return { ok: true as const, rewards: rewards.map((reward) => serializeRewardForApp(reward, app)) };
 }
 export async function createReward(db: Database, config: AppConfig, app: AppIdentity, input: any) {
   const denied = requirePermission(app, 'channel_points:rewards:create'); if (denied) return denied;
@@ -70,22 +87,22 @@ export async function createReward(db: Database, config: AppConfig, app: AppIden
   const response = await twitchFetch(db, config, url, { method: 'POST', body: JSON.stringify(cleaned) });
   const raw = response.data?.[0]; if (!raw) throw new Error('Twitch did not return created reward');
   const { reward } = await upsertReward(db, raw, channel.id, app.id, { createResponse: true });
-  return { ok: true as const, statusCode: 201, reward };
+  return { ok: true as const, statusCode: 201, reward: serializeRewardForApp(reward, app) };
 }
 export async function getReward(db: Database, app: AppIdentity, rewardId: string) {
   const denied = requirePermission(app, 'channel_points:rewards:read'); if (denied) return denied;
   const [reward] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.id, rewardId)).limit(1);
   if (!reward) return { ok: false as const, statusCode: 404, error: 'Reward not found' };
-  return { ok: true as const, reward };
+  return { ok: true as const, reward: serializeRewardForApp(reward, app) };
 }
 async function mutableReward(db: Database, app: AppIdentity, rewardId: string, permission: string) {
   const denied = requirePermission(app, permission); if (denied) return denied;
   const [reward] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.id, rewardId)).limit(1);
-  if (!reward || reward.deletedAt) return { ok: false as const, statusCode: 404, error: 'Reward not found' };
+  if (!reward || reward.deletedAt) return { ok: false as const, statusCode: 404, error: 'Reward not found', code: 'reward_not_found' };
   if ((permission === 'channel_points:rewards:update' || permission === 'channel_points:rewards:delete') && !reward.manageable) {
-    return { ok: false as const, statusCode: 409, error: 'Reward is not manageable by this Twitch client' };
+    return { ok: false as const, statusCode: 409, error: 'Reward is not manageable by this Twitch client', code: 'reward_not_manageable', details: { rewardId } };
   }
-  if (app.slug !== 'admin' && reward.owningAppId !== app.id) return { ok: false as const, statusCode: 403, error: 'Only the owning app can mutate this reward' };
+  if (app.slug !== 'admin' && reward.owningAppId !== app.id) return { ok: false as const, statusCode: 403, error: 'Only the owning app can mutate this reward', code: reward.owningAppId ? 'reward_owned_by_other_app' : 'reward_unowned', details: { rewardId, owningAppId: reward.owningAppId } };
   return { ok: true as const, reward };
 }
 export async function updateReward(db: Database, config: AppConfig, app: AppIdentity, rewardId: string, patch: any) {
@@ -93,14 +110,14 @@ export async function updateReward(db: Database, config: AppConfig, app: AppIden
   const url = new URL(`${helix}/channel_points/custom_rewards`); url.searchParams.set('broadcaster_id', (await primaryChannel(db)).broadcasterUserId); url.searchParams.set('id', loaded.reward.twitchRewardId);
   const response = await twitchFetch(db, config, url, { method: 'PATCH', body: JSON.stringify(Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))) });
   const raw = response.data?.[0]; const { reward } = await upsertReward(db, raw ?? { ...loaded.reward.rawPayload as any, ...patch, id: loaded.reward.twitchRewardId }, loaded.reward.channelId, app.id);
-  return { ok: true as const, reward };
+  return { ok: true as const, reward: serializeRewardForApp(reward, app) };
 }
 export async function deleteReward(db: Database, config: AppConfig, app: AppIdentity, rewardId: string) {
   const loaded = await mutableReward(db, app, rewardId, 'channel_points:rewards:delete'); if (!loaded.ok) return loaded;
   const channel = await primaryChannel(db); const url = new URL(`${helix}/channel_points/custom_rewards`); url.searchParams.set('broadcaster_id', channel.broadcasterUserId); url.searchParams.set('id', loaded.reward.twitchRewardId);
   await twitchFetch(db, config, url, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } });
   const [reward] = await db.update(twitchChannelPointRewards).set({ enabled: false, deletedAt: new Date(), updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, rewardId)).returning();
-  return { ok: true as const, reward };
+  return { ok: true as const, reward: serializeRewardForApp(reward!, app) };
 }
 export async function syncRewards(db: Database, config: AppConfig, app: AppIdentity | null) {
   if (app) { const denied = requirePermission(app, 'channel_points:rewards:read'); if (denied) return denied; }
@@ -118,8 +135,32 @@ export async function syncRewards(db: Database, config: AppConfig, app: AppIdent
     let created = 0, updated = 0, missing = 0;
     for (const raw of rewards) { const result = await upsertReward(db, raw, channel.id, null); result.created ? created++ : updated++; if (!result.reward.owningAppId) missing++; }
     const [updatedRun] = await db.update(rewardSyncRuns).set({ status: 'completed', rewardsSeen: rewards.length, rewardsCreated: created, rewardsUpdated: updated, rewardsMissingOwnership: missing, rewardsMissingOnTwitch: missingOnTwitch.length, completedAt: new Date() }).where(eq(rewardSyncRuns.id, run.id)).returning();
-    return { ok: true as const, run: updatedRun ?? run, rewards: await db.select().from(twitchChannelPointRewards).where(isNull(twitchChannelPointRewards.deletedAt)).orderBy(twitchChannelPointRewards.title) };
+    const localRewards = await db.select().from(twitchChannelPointRewards).where(isNull(twitchChannelPointRewards.deletedAt)).orderBy(twitchChannelPointRewards.title);
+    return { ok: true as const, run: updatedRun ?? run, rewards: app ? localRewards.map((reward) => serializeRewardForApp(reward, app)) : localRewards };
   } catch (error) { const message = error instanceof Error ? error.message : String(error); await db.update(rewardSyncRuns).set({ status: 'failed', error: message, completedAt: new Date() }).where(eq(rewardSyncRuns.id, run.id)); throw error; }
+}
+
+export async function adoptReward(db: Database, app: AppIdentity, rewardId: string, input: { app_ownership_key: string; expected_twitch_reward_id?: string; local_reward_type?: string }) {
+  const denied = requireAnyPermission(app, ['channel_points:rewards:adopt', 'channel_points:rewards:update']); if (denied) return denied;
+  const [reward] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.id, rewardId)).limit(1);
+  if (!reward || reward.deletedAt) return { ok: false as const, statusCode: 404, error: 'Reward not found', code: 'reward_not_found' };
+  if (input.expected_twitch_reward_id && input.expected_twitch_reward_id !== reward.twitchRewardId) return { ok: false as const, statusCode: 400, error: 'Reward did not match expected Twitch reward id', code: 'expected_twitch_reward_id_mismatch', details: { expectedTwitchRewardId: input.expected_twitch_reward_id, actualTwitchRewardId: reward.twitchRewardId } };
+  if (!reward.manageable) return { ok: false as const, statusCode: 409, error: 'Reward is not manageable by this Twitch client', code: 'reward_not_manageable', details: { rewardId, twitchRewardId: reward.twitchRewardId } };
+  if (reward.owningAppId && reward.owningAppId !== app.id) return { ok: false as const, statusCode: 409, error: 'Reward is already owned by another app', code: 'reward_owned_by_other_app', details: { rewardId, owningAppId: reward.owningAppId } };
+  const [updated] = await db.update(twitchChannelPointRewards).set({ owningAppId: app.id, appOwnershipKey: input.app_ownership_key, updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, reward.id)).returning();
+  await db.insert(appChannelPointRewardBindings).values({ appId: app.id, rewardId: reward.id, permission: 'owner' }).onConflictDoUpdate({ target: [appChannelPointRewardBindings.appId, appChannelPointRewardBindings.rewardId], set: { permission: 'owner' } });
+  await db.insert(adminAuditLog).values({ action: 'channel_points.reward.adopt', targetType: 'channel_point_reward', targetId: reward.id, metadata: { appId: app.id, appSlug: app.slug, twitchRewardId: reward.twitchRewardId, appOwnershipKey: input.app_ownership_key, localRewardType: input.local_reward_type ?? null } });
+  return { ok: true as const, reward: serializeRewardForApp(updated!, app) };
+}
+export async function releaseReward(db: Database, app: AppIdentity, rewardId: string) {
+  const denied = requireAnyPermission(app, ['channel_points:rewards:adopt', 'channel_points:rewards:update']); if (denied) return denied;
+  const [reward] = await db.select().from(twitchChannelPointRewards).where(eq(twitchChannelPointRewards.id, rewardId)).limit(1);
+  if (!reward || reward.deletedAt) return { ok: false as const, statusCode: 404, error: 'Reward not found', code: 'reward_not_found' };
+  if (app.slug !== 'admin' && reward.owningAppId !== app.id) return { ok: false as const, statusCode: 403, error: 'Only the owning app can release this reward', code: reward.owningAppId ? 'reward_owned_by_other_app' : 'reward_unowned', details: { rewardId, owningAppId: reward.owningAppId } };
+  const [updated] = await db.update(twitchChannelPointRewards).set({ owningAppId: null, appOwnershipKey: null, updatedAt: new Date() }).where(eq(twitchChannelPointRewards.id, reward.id)).returning();
+  if (reward.owningAppId) await db.delete(appChannelPointRewardBindings).where(and(eq(appChannelPointRewardBindings.appId, reward.owningAppId), eq(appChannelPointRewardBindings.rewardId, reward.id)));
+  await db.insert(adminAuditLog).values({ action: 'channel_points.reward.release', targetType: 'channel_point_reward', targetId: reward.id, metadata: { appId: app.id, appSlug: app.slug, previousOwningAppId: reward.owningAppId, previousAppOwnershipKey: reward.appOwnershipKey } });
+  return { ok: true as const, reward: serializeRewardForApp(updated!, app) };
 }
 export async function listRedemptions(db: Database, app: AppIdentity, query: { rewardId?: string; status?: string; limit?: number }) {
   const denied = requirePermission(app, 'channel_points:redemptions:read'); if (denied) return denied;
