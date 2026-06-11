@@ -172,7 +172,6 @@ function App() {
   const [channelPointRedemptions, setChannelPointRedemptions] = useState<ChannelPointRedemption[]>([]);
   const [channelPointDiagnostics, setChannelPointDiagnostics] = useState<ChannelPointDiagnostics | null>(null);
   const [channelPointRewardSyncRun, setChannelPointRewardSyncRun] = useState<ChannelPointRewardSyncRun | null>(null);
-  const [rewardForm, setRewardForm] = useState({ title: '', cost: '', prompt: '', owning_app_id: '', is_enabled: true });
   const [commandForm, setCommandForm] = useState({ command: '', aliases: '', responseText: '', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [adminKey, setAdminKey] = useState(() => window.localStorage.getItem('erwinGatewayAdminKey') ?? '');
@@ -353,30 +352,6 @@ function App() {
     setChannelPointRewardSyncRun(payload.run ?? null);
     setShowDeletedChannelPointRewards(false);
     await loadChannelPoints(false);
-  }
-
-  async function createChannelPointReward() {
-    const cost = Number(rewardForm.cost);
-    if (!rewardForm.title.trim()) throw new Error('Reward title is required');
-    if (!Number.isFinite(cost) || cost < 1) throw new Error('Reward cost must be at least 1');
-    if (!rewardForm.owning_app_id) throw new Error('Reward owning app is required');
-
-    const response = await fetch('/api/admin/channel-points/rewards', {
-      method: 'POST',
-      headers: adminHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        title: rewardForm.title.trim(),
-        cost,
-        prompt: rewardForm.prompt.trim(),
-        owning_app_id: rewardForm.owning_app_id,
-        is_enabled: rewardForm.is_enabled
-      })
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      throw new Error(`Create reward failed with ${response.status}${payload?.error ? `: ${payload.error}` : ''}`);
-    }
-    await loadChannelPoints();
   }
 
   async function updateChannelPointReward(reward: ChannelPointReward, patch: Record<string, unknown>) {
@@ -1086,17 +1061,10 @@ function App() {
             </div>
           ) : null}
 
-          <form className="create-form command-form" onSubmit={(event) => { event.preventDefault(); void createChannelPointReward().catch((createError) => setError(String(createError))); }}>
-            <label>Title<input required value={rewardForm.title} onChange={(event) => setRewardForm({ ...rewardForm, title: event.target.value })} placeholder="Example: hatchery-reward" /></label>
-            <label>Cost<input required type="number" min="1" value={rewardForm.cost} onChange={(event) => setRewardForm({ ...rewardForm, cost: event.target.value })} placeholder="Example: 1000" /></label>
-            <label>Prompt<textarea value={rewardForm.prompt} onChange={(event) => setRewardForm({ ...rewardForm, prompt: event.target.value })} placeholder="Example: Redeem a Hatchery reward" /></label>
-            <label>Owning app<select required value={rewardForm.owning_app_id} onChange={(event) => setRewardForm({ ...rewardForm, owning_app_id: event.target.value })}>
-              <option value="">Select an owning app</option>
-              {visibleApps.map((registeredApp) => <option key={registeredApp.id} value={registeredApp.id}>{registeredApp.slug} — {registeredApp.name}</option>)}
-            </select></label>
-            <label className="checkbox-label"><input type="checkbox" checked={rewardForm.is_enabled} onChange={(event) => setRewardForm({ ...rewardForm, is_enabled: event.target.checked })} /> Enabled</label>
-            <button type="submit">Create reward</button>
-          </form>
+          <div className="notice-card">
+            <strong>Reward creation lives in downstream apps.</strong>
+            <p>Use this admin view to sync, inspect, enable, disable, or delete rewards. Apps that own reward behavior should create custom rewards through the app API with their own API keys.</p>
+          </div>
 
           <div className="stats-grid">
             <article><h3>Missing scope</h3><p>{channelPointDiagnostics?.missingChannelManageRedemptions ? 'channel:manage:redemptions missing' : 'OK'}</p></article>

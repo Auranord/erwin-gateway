@@ -239,7 +239,8 @@ code {
   background: rgba(127, 29, 29, 0.35);
 }
 
-.sync-summary {
+.sync-summary,
+.notice-card {
   margin: 0 0 1rem;
   padding: 0.85rem 1rem;
   border: 1px solid rgba(59, 130, 246, 0.28);
@@ -247,6 +248,10 @@ code {
   color: #dbeafe;
   background: rgba(59, 130, 246, 0.13);
   line-height: 1.55;
+}
+
+.notice-card p {
+  margin: 0.35rem 0 0;
 }
 
 .one-time-key {

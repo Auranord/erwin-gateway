@@ -10,7 +10,7 @@ import { appPermissions, defaultAppPermissions, normalizePermissions } from '../
 import { registerTwitchAdminRoutes } from '../twitch/routes.js';
 import { getOutgoingChatMessage, listOutgoingChatMessages, retryOutgoingChatMessage } from '../twitch-chat/service.js';
 import { deliverWebhookNow, generateWebhookSecret, getWebhookDeliveryWithAttempts, listChatLog, listWebhookDeliveries } from '../webhooks/service.js';
-import { channelPointDiagnostics, createReward, deleteReward, listRedemptions, listRewards, syncRewards, updateReward } from '../channel-points/service.js';
+import { channelPointDiagnostics, deleteReward, listRedemptions, listRewards, syncRewards, updateReward } from '../channel-points/service.js';
 import { twitchDataDiagnostics } from '../twitch-data.js';
 
 const adminPages = [
@@ -579,7 +579,7 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
   });
 
 
-  const adminChannelPointApp = { id: '00000000-0000-0000-0000-000000000000', slug: 'admin', permissions: ['channel_points:rewards:read', 'channel_points:rewards:create', 'channel_points:rewards:update', 'channel_points:rewards:delete', 'channel_points:redemptions:read', 'channel_points:redemptions:manage', 'channel_points:events:receive'] };
+  const adminChannelPointApp = { id: '00000000-0000-0000-0000-000000000000', slug: 'admin', permissions: ['channel_points:rewards:read', 'channel_points:rewards:update', 'channel_points:rewards:delete', 'channel_points:redemptions:read', 'channel_points:redemptions:manage', 'channel_points:events:receive'] };
   const adminRewardPayloadSchema = z.object({
     title: z.string().min(1).max(45).optional(),
     cost: z.number().int().min(1).max(1_000_000_000).optional(),
@@ -606,22 +606,6 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
     await audit(options.db, 'channel_points.rewards.sync', 'channel_point_reward', 'all', { runId: result.run.id });
     return { run: result.run, rewards: result.rewards };
-  });
-
-  app.post('/api/admin/channel-points/rewards', async (request, reply) => {
-    if (!requireDatabase(options.db, reply)) return reply;
-    const body = adminRewardPayloadSchema.extend({ title: z.string().min(1).max(45), cost: z.number().int().min(1).max(1_000_000_000) }).safeParse(request.body);
-    if (!body.success) return reply.code(400).send({ error: 'Invalid reward payload', issues: body.error.issues });
-    const [owner] = body.data.owning_app_id
-      ? await options.db.select().from(apps).where(eq(apps.id, body.data.owning_app_id)).limit(1)
-      : await options.db.select().from(apps).where(eq(apps.slug, 'erwin-hatchery')).limit(1);
-    if (!owner && body.data.owning_app_id) return reply.code(400).send({ error: 'Owning app not found for admin reward creation' });
-    if (!owner) return reply.code(400).send({ error: 'Select an owning app for admin reward creation; no owning_app_id was provided and default app erwin-hatchery was not found' });
-    const ownerApp = { id: owner.id, slug: owner.slug, permissions: adminChannelPointApp.permissions };
-    const result = await createReward(options.db, options.config, ownerApp, body.data);
-    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error });
-    await audit(options.db, 'channel_points.reward.create_admin_override', 'channel_point_reward', result.reward.id, { explicitAdminOverride: true });
-    return reply.code(201).send({ reward: result.reward });
   });
 
   app.patch('/api/admin/channel-points/rewards/:rewardId', async (request, reply) => {
