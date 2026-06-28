@@ -9,7 +9,7 @@ import { generateAppApiKey } from '../apps/api-keys.js';
 import { appPermissions, defaultAppPermissions, normalizePermissions } from '../apps/permissions.js';
 import { registerTwitchAdminRoutes } from '../twitch/routes.js';
 import { getOutgoingChatMessage, listOutgoingChatMessages, retryOutgoingChatMessage } from '../twitch-chat/service.js';
-import { deliverWebhookNow, generateWebhookSecret, getWebhookDeliveryWithAttempts, listChatLog, listWebhookDeliveries } from '../webhooks/service.js';
+import { deliverWebhookNow, enqueueWebhookDeliveriesForEvent, generateWebhookSecret, getWebhookDeliveryWithAttempts, listChatLog, listWebhookDeliveries } from '../webhooks/service.js';
 import { channelPointDiagnostics, deleteReward, listRedemptions, listRewards, syncRewards, updateReward } from '../channel-points/service.js';
 import { twitchDataDiagnostics } from '../twitch-data.js';
 
@@ -22,6 +22,7 @@ const adminPages = [
   'Outgoing Messages',
   'Webhook Deliveries',
   'Channel Points',
+  'Debug Events',
   'Diagnostics',
   'Docs'
 ];
@@ -221,6 +222,44 @@ export async function registerAdminApiRoutes(app: FastifyInstance, options: Admi
     message: 'Admin UI shell is available with app registry, Twitch setup, outgoing queue, and text command management.'
   }));
 
+
+
+  const debugEventSchema = z.object({
+    type: z.string().min(1).max(160),
+    externalId: z.string().max(200).optional().nullable(),
+    occurredAt: z.coerce.date().optional(),
+    payload: z.record(z.unknown()).default({})
+  });
+
+  app.post('/api/admin/debug/events', async (request, reply) => {
+    if (!requireDatabase(options.db, reply)) return reply;
+    const parsed = debugEventSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid debug event payload', issues: parsed.error.issues });
+
+    const now = new Date();
+    const externalId = parsed.data.externalId?.trim() || `admin-debug-${now.toISOString()}-${Math.random().toString(36).slice(2, 10)}`;
+    const payload = {
+      ...parsed.data.payload,
+      debug: {
+        injected: true,
+        source: 'admin_debug_event_gui',
+        injected_at: now.toISOString()
+      }
+    };
+    const [event] = await options.db.insert(events).values({
+      source: 'admin_debug',
+      type: parsed.data.type,
+      externalId,
+      payload,
+      status: 'processed',
+      occurredAt: parsed.data.occurredAt ?? now,
+      processedAt: now
+    }).returning();
+    if (!event) return reply.code(500).send({ error: 'Debug event was not created' });
+    const deliveries = await enqueueWebhookDeliveriesForEvent(options.db, event.id);
+    await audit(options.db, 'debug_event.inject', 'event', event.id, { type: event.type, externalId, deliveryCount: deliveries.length });
+    return reply.code(201).send({ event, deliveries, deliveryCount: deliveries.length });
+  });
 
   app.get('/api/admin/diagnostics', async (_request, reply) => {
     if (!requireDatabase(options.db, reply)) return reply;
