@@ -376,6 +376,42 @@ code {
   font-weight: 800;
 }
 
+.capability-picker,
+.advanced-fields {
+  grid-column: 1 / -1;
+}
+
+.capability-label {
+  align-items: flex-start;
+}
+
+.capability-label span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.capability-label small {
+  color: #bfdbfe;
+}
+
+.advanced-fields {
+  padding: 0.8rem 1rem;
+  border: 1px solid rgba(147, 197, 253, 0.22);
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.advanced-fields summary {
+  cursor: pointer;
+  color: #dbeafe;
+  font-weight: 800;
+}
+
+.advanced-fields label,
+.advanced-fields .permission-picker {
+  margin-top: 0.8rem;
+}
+
 .webhook-summary {
   display: grid;
   gap: 0.4rem;

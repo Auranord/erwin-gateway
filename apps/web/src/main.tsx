@@ -80,10 +80,22 @@ type RegisteredApp = {
   webhook: Webhook;
 };
 
+type AppCapabilityKey = 'chat_receive' | 'chat_send' | 'chat_commands' | 'channel_points' | 'subscriptions' | 'bits' | 'streams' | 'diagnostics';
+
+type AppCapability = {
+  key: AppCapabilityKey;
+  label: string;
+  description: string;
+  permissions: string[];
+  optionalPermissions?: string[];
+  webhookEventFilters: string[];
+};
+
 type AppEditForm = {
   name: string;
   slug: string;
   description: string;
+  selectedCapabilities: AppCapabilityKey[];
   permissions: string[];
   webhookUrl: string;
   webhookEventFilters: string;
@@ -176,18 +188,127 @@ const fallbackPermissions = [
   'admin:twitch'
 ];
 
+
+const appCapabilities: AppCapability[] = [
+  {
+    key: 'chat_receive',
+    label: 'Receive chat messages',
+    description: 'Deliver Twitch chat messages to the app webhook.',
+    permissions: ['chat:messages:receive'],
+    webhookEventFilters: ['twitch.chat.message']
+  },
+  {
+    key: 'chat_send',
+    label: 'Send chat messages',
+    description: 'Allow the app to enqueue outbound chat messages.',
+    permissions: ['chat:messages:send'],
+    webhookEventFilters: []
+  },
+  {
+    key: 'chat_commands',
+    label: 'Receive chat commands',
+    description: 'Deliver chat messages so the app can process commands.',
+    permissions: ['chat:commands:receive'],
+    webhookEventFilters: ['twitch.chat.message']
+  },
+  {
+    key: 'channel_points',
+    label: 'Channel Points',
+    description: 'Manage rewards, inspect redemptions, and receive redemption events.',
+    permissions: [
+      'channel_points:rewards:read',
+      'channel_points:rewards:create',
+      'channel_points:rewards:update',
+      'channel_points:rewards:delete',
+      'channel_points:redemptions:read',
+      'channel_points:redemptions:manage',
+      'channel_points:events:receive'
+    ],
+    webhookEventFilters: ['twitch.channel_points.custom_reward_redemption.add', 'twitch.channel_points.custom_reward_redemption.update']
+  },
+  {
+    key: 'subscriptions',
+    label: 'Subscriptions',
+    description: 'Read subscription data, backfill when needed, and receive subscription events.',
+    permissions: ['subscriptions:read'],
+    optionalPermissions: ['subscriptions:backfill'],
+    webhookEventFilters: ['twitch.channel.subscribe', 'twitch.channel.subscription.end', 'twitch.channel.subscription.message', 'twitch.channel.subscription.gift']
+  },
+  {
+    key: 'bits',
+    label: 'Bits',
+    description: 'Read Bits data, backfill when needed, and receive cheer events.',
+    permissions: ['bits:read'],
+    optionalPermissions: ['bits:backfill'],
+    webhookEventFilters: ['twitch.channel.cheer']
+  },
+  {
+    key: 'streams',
+    label: 'Streams and channel updates',
+    description: 'Read stream state and receive stream/channel update events.',
+    permissions: ['streams:read'],
+    webhookEventFilters: ['twitch.stream.online', 'twitch.stream.offline', 'twitch.channel.update']
+  },
+  {
+    key: 'diagnostics',
+    label: 'Diagnostics',
+    description: 'Allow app-owned log and event diagnostics access.',
+    permissions: ['logs:read_own'],
+    optionalPermissions: ['events:read'],
+    webhookEventFilters: []
+  }
+];
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values));
+}
+
+function getCapabilityPermissions(capability: AppCapability) {
+  return [...capability.permissions, ...(capability.optionalPermissions ?? [])];
+}
+
+function deriveCapabilityAccess(selectedCapabilities: AppCapabilityKey[]) {
+  const selected = appCapabilities.filter((capability) => selectedCapabilities.includes(capability.key));
+  return {
+    permissions: uniqueValues(selected.flatMap(getCapabilityPermissions)),
+    webhookEventFilters: uniqueValues(selected.flatMap((capability) => capability.webhookEventFilters))
+  };
+}
+
+function deriveAppAccess(selectedCapabilities: AppCapabilityKey[], rawPermissions: string[], rawWebhookEventFilters: string) {
+  const derivedAccess = deriveCapabilityAccess(selectedCapabilities);
+  return {
+    permissions: uniqueValues([...derivedAccess.permissions, ...rawPermissions]),
+    webhookEventFilters: uniqueValues([...derivedAccess.webhookEventFilters, ...splitCsv(rawWebhookEventFilters)])
+  };
+}
+
+function capabilitiesFromAccess(rawPermissions: string[], webhookEventFilters: string[]) {
+  return appCapabilities
+    .filter((capability) => {
+      const capabilityPermissions = getCapabilityPermissions(capability);
+      return capabilityPermissions.some((permission) => rawPermissions.includes(permission))
+        || capability.webhookEventFilters.some((filter) => webhookEventFilters.includes(filter));
+    })
+    .map((capability) => capability.key);
+}
+
 function splitCsv(value: string) {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
 function appToEditForm(app: RegisteredApp): AppEditForm {
+  const selectedCapabilities = capabilitiesFromAccess(app.permissions, app.webhook.eventFilters);
+  const derivedAccess = deriveCapabilityAccess(selectedCapabilities);
+
   return {
     name: app.name,
     slug: app.slug,
     description: app.description ?? '',
-    permissions: app.permissions,
+    selectedCapabilities,
+    permissions: app.permissions.filter((permission) => !derivedAccess.permissions.includes(permission)),
     webhookUrl: app.webhook.url,
-    webhookEventFilters: app.webhook.eventFilters.join(',')
+    webhookEventFilters: app.webhook.eventFilters.filter((filter) => !derivedAccess.webhookEventFilters.includes(filter)).join(',')
   };
 }
 
@@ -232,6 +353,8 @@ function App() {
     slug: '',
     description: '',
     webhookUrl: '',
+    selectedCapabilities: [] as AppCapabilityKey[],
+    permissions: [] as string[],
     webhookEventFilters: ''
   });
   const [appEditForms, setAppEditForms] = useState<Record<string, AppEditForm>>({});
@@ -523,9 +646,9 @@ function App() {
         name: form.name.trim(),
         slug: form.slug.trim(),
         description: form.description.trim(),
-        permissions: [],
+        permissions: deriveAppAccess(form.selectedCapabilities, form.permissions, form.webhookEventFilters).permissions,
         webhookUrl: form.webhookUrl.trim(),
-        webhookEventFilters: splitCsv(form.webhookEventFilters)
+        webhookEventFilters: deriveAppAccess(form.selectedCapabilities, form.permissions, form.webhookEventFilters).webhookEventFilters
       })
     });
     if (!response.ok) throw new Error(`Create app failed with ${response.status}`);
@@ -549,6 +672,31 @@ function App() {
       const editForm = current[appId];
       if (!editForm) return current;
       return { ...current, [appId]: { ...editForm, [field]: value } };
+    });
+  }
+
+  function toggleCreateAppCapability(capabilityKey: AppCapabilityKey) {
+    const selectedCapabilities = form.selectedCapabilities.includes(capabilityKey)
+      ? form.selectedCapabilities.filter((currentCapabilityKey) => currentCapabilityKey !== capabilityKey)
+      : [...form.selectedCapabilities, capabilityKey];
+    setForm({ ...form, selectedCapabilities });
+  }
+
+  function toggleCreateAppPermission(permission: string) {
+    const nextPermissions = form.permissions.includes(permission)
+      ? form.permissions.filter((currentPermission) => currentPermission !== permission)
+      : [...form.permissions, permission];
+    setForm({ ...form, permissions: nextPermissions });
+  }
+
+  function toggleAppEditCapability(appId: string, capabilityKey: AppCapabilityKey) {
+    setAppEditForms((current) => {
+      const editForm = current[appId];
+      if (!editForm) return current;
+      const selectedCapabilities = editForm.selectedCapabilities.includes(capabilityKey)
+        ? editForm.selectedCapabilities.filter((currentCapabilityKey) => currentCapabilityKey !== capabilityKey)
+        : [...editForm.selectedCapabilities, capabilityKey];
+      return { ...current, [appId]: { ...editForm, selectedCapabilities } };
     });
   }
 
@@ -590,9 +738,9 @@ function App() {
       name: editForm.name,
       slug: editForm.slug,
       description: editForm.description,
-      permissions: editForm.permissions,
+      permissions: deriveAppAccess(editForm.selectedCapabilities, editForm.permissions, editForm.webhookEventFilters).permissions,
       webhookUrl: editForm.webhookUrl,
-      webhookEventFilters: splitCsv(editForm.webhookEventFilters)
+      webhookEventFilters: deriveAppAccess(editForm.selectedCapabilities, editForm.permissions, editForm.webhookEventFilters).webhookEventFilters
     });
     cancelAppEdit(app.id);
   }
@@ -814,7 +962,28 @@ function App() {
             <label>Slug<input required value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="Example: erwin-hatchery" /></label>
             <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Example: Hatchery reward integration" /></label>
             <label>Webhook URL<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="Example: https://app.example/webhooks/erwin" /></label>
-            <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
+            <fieldset className="permission-picker capability-picker">
+              <legend>Capabilities</legend>
+              {appCapabilities.map((capability) => (
+                <label className="checkbox-label capability-label" key={capability.key}>
+                  <input type="checkbox" checked={form.selectedCapabilities.includes(capability.key)} onChange={() => toggleCreateAppCapability(capability.key)} />
+                  <span><strong>{capability.label}</strong><small>{capability.description}</small></span>
+                </label>
+              ))}
+            </fieldset>
+            <details className="advanced-fields">
+              <summary>Advanced permissions and webhook filters</summary>
+              <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
+              <fieldset className="permission-picker">
+                <legend>Permissions</legend>
+                {permissions.map((permission) => (
+                  <label className="checkbox-label" key={permission}>
+                    <input type="checkbox" checked={form.permissions.includes(permission)} onChange={() => toggleCreateAppPermission(permission)} />
+                    {permission}
+                  </label>
+                ))}
+              </fieldset>
+            </details>
             <button type="submit">Create app</button>
           </form>
 
@@ -854,17 +1023,29 @@ function App() {
                         <label>Slug<input value={editForm.slug} onChange={(event) => updateAppEditField(registeredApp.id, 'slug', event.target.value)} /></label>
                         <label>Description<input value={editForm.description} onChange={(event) => updateAppEditField(registeredApp.id, 'description', event.target.value)} /></label>
                         <label>Webhook URL<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="Example: https://app.example/webhooks/erwin" /></label>
-                        <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
                       </div>
-                      <fieldset className="permission-picker">
-                        <legend>Permissions</legend>
-                        {permissions.map((permission) => (
-                          <label className="checkbox-label" key={permission}>
-                            <input type="checkbox" checked={editForm.permissions.includes(permission)} onChange={() => toggleAppEditPermission(registeredApp.id, permission)} />
-                            {permission}
+                      <fieldset className="permission-picker capability-picker">
+                        <legend>Capabilities</legend>
+                        {appCapabilities.map((capability) => (
+                          <label className="checkbox-label capability-label" key={capability.key}>
+                            <input type="checkbox" checked={editForm.selectedCapabilities.includes(capability.key)} onChange={() => toggleAppEditCapability(registeredApp.id, capability.key)} />
+                            <span><strong>{capability.label}</strong><small>{capability.description}</small></span>
                           </label>
                         ))}
                       </fieldset>
+                      <details className="advanced-fields">
+                        <summary>Advanced permissions and webhook filters</summary>
+                        <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
+                        <fieldset className="permission-picker">
+                          <legend>Permissions</legend>
+                          {permissions.map((permission) => (
+                            <label className="checkbox-label" key={permission}>
+                              <input type="checkbox" checked={editForm.permissions.includes(permission)} onChange={() => toggleAppEditPermission(registeredApp.id, permission)} />
+                              {permission}
+                            </label>
+                          ))}
+                        </fieldset>
+                      </details>
                       {invalidEditPermissions.length > 0 ? <p className="error">Remove invalid permissions before saving: {invalidEditPermissions.join(', ')}</p> : null}
                     </div>
                   ) : (
