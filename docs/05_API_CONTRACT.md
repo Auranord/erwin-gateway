@@ -96,9 +96,38 @@ Reward create example:
   "is_max_per_stream_enabled": false,
   "is_max_per_user_per_stream_enabled": false,
   "is_global_cooldown_enabled": false,
-  "app_ownership_key": "hatchery:mystery_egg"
+  "app_ownership_key": "hatchery:mystery_egg",
+  "local_reward_type": "mystery_egg"
 }
 ```
+
+Reward adoption binds an existing Twitch reward that was discovered by sync to the authenticated app without creating a new Twitch reward. The app must have `channel_points:rewards:adopt` or `channel_points:rewards:update`. The target reward must exist locally, must not be deleted, must be manageable by the gateway Twitch client, and must be unowned or already owned by the same app. If another app owns the reward, adoption returns a conflict instead of transferring ownership. Use `expected_twitch_reward_id` as a cutover safety check so a stale gateway reward ID cannot bind the wrong Twitch reward.
+
+Reward adopt example for `POST /api/v1/channel-points/rewards/:rewardId/adopt`:
+
+```json
+{
+  "app_ownership_key": "hatchery:mystery_egg",
+  "expected_twitch_reward_id": "twitch-reward-123",
+  "local_reward_type": "mystery_egg"
+}
+```
+
+Reward release removes the authenticated app's local ownership binding without deleting or disabling the Twitch reward. It requires `channel_points:rewards:adopt` or `channel_points:rewards:update`. Only the owning app can release its reward unless an admin override is used; releasing an unowned reward or a reward owned by another app is rejected.
+
+Reward release example for `POST /api/v1/channel-points/rewards/:rewardId/release`:
+
+```json
+{
+  "app_ownership_key": "hatchery:mystery_egg",
+  "expected_twitch_reward_id": "twitch-reward-123",
+  "local_reward_type": "mystery_egg"
+}
+```
+
+The release endpoint currently does not require request fields; include this payload in client-side runbooks and audit notes when planning a cutover, but treat ownership checks as server-side state checks against the authenticated app and stored reward.
+
+During Hatchery cutover, adopt existing Twitch rewards only when Hatchery will manage their title, cost, enabled state, redemption fulfillment/cancelation, and lifecycle through the gateway. Leave rewards admin-managed when they are shared with another app, manually administered by the broadcaster, not manageable by the gateway Twitch client, or intentionally outside Hatchery's economy automation.
 
 Redemption status update example:
 
@@ -228,6 +257,7 @@ logs:read_all
 channel_points:rewards:read
 channel_points:rewards:create
 channel_points:rewards:update
+channel_points:rewards:adopt
 channel_points:rewards:delete
 channel_points:redemptions:read
 channel_points:redemptions:manage
@@ -260,6 +290,7 @@ chat:messages:send
 channel_points:rewards:read
 channel_points:rewards:create
 channel_points:rewards:update
+channel_points:rewards:adopt
 channel_points:rewards:delete
 channel_points:redemptions:read
 channel_points:redemptions:manage

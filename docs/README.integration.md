@@ -34,6 +34,8 @@ Use this matrix when requesting permissions for a registered app. All app-facing
 | Channel Point reward read | `GET /api/v1/channel-points/rewards`, `GET /api/v1/channel-points/rewards/:rewardId`, reward sync/read helpers | `channel_points:rewards:read` | Read access includes listing and inspecting reward records. |
 | Channel Point reward create | `POST /api/v1/channel-points/rewards` | `channel_points:rewards:create` | Creates app-owned custom rewards through the gateway. |
 | Channel Point reward update | `PATCH /api/v1/channel-points/rewards/:rewardId` | `channel_points:rewards:update` | Only the owning app can mutate an app-owned reward. |
+| Channel Point reward adopt | `POST /api/v1/channel-points/rewards/:rewardId/adopt` | `channel_points:rewards:adopt` or `channel_points:rewards:update` | Binds an unowned, manageable Twitch reward discovered by sync to the authenticated app. |
+| Channel Point reward release | `POST /api/v1/channel-points/rewards/:rewardId/release` | `channel_points:rewards:adopt` or `channel_points:rewards:update` | Removes the app ownership binding without deleting the Twitch reward; only the owning app or admin override can release. |
 | Channel Point reward delete | `DELETE /api/v1/channel-points/rewards/:rewardId` | `channel_points:rewards:delete` | Deletes or disables a manageable app-owned reward. |
 | Channel Point redemption read | `GET /api/v1/channel-points/redemptions`, Twitch redemption fetch helpers | `channel_points:redemptions:read` | Required to list or inspect redemptions. |
 | Channel Point redemption manage | `PATCH /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status` | `channel_points:redemptions:manage` | Required to fulfill or cancel redemptions after downstream processing. |
@@ -388,7 +390,52 @@ Choose uniqueness based on the external effect:
 - `event_id`: prevents repeating work when the same gateway event is redelivered.
 - Twitch redemption id (`payload.redemption.id`): prevents granting the same Channel Point reward twice across `add`, `update`, manual retry, or app reprocessing paths.
 
-### 6.5 Fulfill or cancel Channel Point redemptions
+
+### 6.5 Adopt or release existing Channel Point rewards
+
+Run `POST /api/v1/channel-points/rewards/sync` before adoption so the gateway has local records for existing Twitch rewards. Adoption is for cutovers where the app should become the gateway owner of an existing Twitch reward instead of creating a duplicate reward.
+
+Adopt an existing reward:
+
+```ts
+async function adoptExistingReward(rewardId: string, twitchRewardId: string) {
+  return gatewayFetch(`/api/v1/channel-points/rewards/${rewardId}/adopt`, {
+    method: 'POST',
+    body: JSON.stringify({
+      app_ownership_key: 'hatchery:mystery_egg',
+      expected_twitch_reward_id: twitchRewardId,
+      local_reward_type: 'mystery_egg',
+    }),
+  });
+}
+```
+
+Release a reward back to admin-managed local state without deleting the Twitch reward:
+
+```ts
+async function releaseReward(rewardId: string, twitchRewardId: string) {
+  return gatewayFetch(`/api/v1/channel-points/rewards/${rewardId}/release`, {
+    method: 'POST',
+    body: JSON.stringify({
+      app_ownership_key: 'hatchery:mystery_egg',
+      expected_twitch_reward_id: twitchRewardId,
+      local_reward_type: 'mystery_egg',
+    }),
+  });
+}
+```
+
+Required permissions and constraints:
+
+- Adoption and release require `channel_points:rewards:adopt` or `channel_points:rewards:update`.
+- Adoption only succeeds for a local, non-deleted reward that is manageable by the gateway Twitch client and is unowned or already owned by the authenticated app.
+- `expected_twitch_reward_id` is optional but strongly recommended; when supplied, the gateway rejects the request if the local reward points at a different Twitch reward.
+- Release does not delete, disable, or mutate the Twitch reward. It clears the local owner and ownership key so the reward becomes admin-managed.
+- A non-admin app cannot adopt a reward owned by another app or release a reward it does not own.
+
+During Hatchery cutover, adopt existing Twitch rewards when they represent Hatchery economy products and Hatchery will own future reward edits, redemption fulfillment/cancelation, and lifecycle through the gateway. Leave rewards admin-managed when the broadcaster intends to keep manual control, another app shares or owns the behavior, the gateway Twitch client cannot manage the reward, or Hatchery only needs to observe redemptions without mutating reward configuration.
+
+### 6.6 Fulfill or cancel Channel Point redemptions
 
 The gateway records redemptions but does not auto-fulfill or auto-cancel them. After your app durably completes or rejects its domain work, call the explicit status endpoint for the app-owned reward.
 
