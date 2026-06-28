@@ -208,7 +208,14 @@ PATCH  /api/admin/channel-points/rewards/:rewardId
 DELETE /api/admin/channel-points/rewards/:rewardId
 ```
 
-Admin routes may be protected by local admin session, reverse proxy auth, or a strong admin API key in MVP. Do not expose admin routes publicly without auth.
+Current MVP admin authentication contract:
+
+- `INTERNAL_ADMIN_API_KEY` is required for admin routes. Configure it as a strong secret in each deployed environment.
+- Admin API callers may send either `X-Admin-API-Key: <key>` or `Authorization: Bearer <key>`.
+- The only `/api/admin/twitch/*/callback` exception is the Twitch OAuth callback route family (`GET /api/admin/twitch/bot/callback` and `GET /api/admin/twitch/broadcaster/callback`), which must remain reachable by the operator's browser after Twitch authorization.
+- Do not expose the admin UI or `/api/admin/*` publicly without reverse-proxy authentication, VPN/private-network access, IP allowlisting, or an equivalent boundary.
+
+For TrueNAS/reverse proxy deployments, publish the Twitch EventSub webhook and OAuth callback paths through HTTPS, but keep admin surfaces private or protected at the proxy before requests reach the gateway.
 
 Queue inspection and retry admin endpoints intentionally use the implemented resource-specific route names above: `/api/admin/outgoing-chat/messages*` for outgoing chat messages and `/api/admin/webhook-deliveries*` for webhook deliveries. Do not document `/api/admin/queues/*` as an active route unless queue aliases are intentionally added later.
 
