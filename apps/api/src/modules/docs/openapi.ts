@@ -1,3 +1,39 @@
+function uuidParam(name: string) {
+  return { name, in: 'path', required: true, schema: { type: 'string', format: 'uuid' } };
+}
+
+function queryParams(names: string[]) {
+  return names.map((name) => ({ name, in: 'query', required: false, schema: name === 'limit' || name.endsWith('Limit') || name === 'count' ? { type: 'integer' } : { type: 'string' } }));
+}
+
+function schemaBody(properties: string[], required: string[] = []) {
+  return { required: required.length > 0, content: { 'application/json': { schema: { type: 'object', required, properties: Object.fromEntries(properties.map((name) => [name, { type: name === 'payload' ? 'object' : name === 'count' ? 'integer' : 'string' }])) } } } };
+}
+
+function refBody($ref: string, required = true) {
+  return { required, content: { 'application/json': { schema: { $ref } } } };
+}
+
+function emptyBody() {
+  return { required: false, content: { 'application/json': { schema: { type: 'object', additionalProperties: false } } } };
+}
+
+function objectResponse(description: string, properties: string[], status = '200') {
+  return { [status]: { description, content: { 'application/json': { schema: { type: 'object', properties: Object.fromEntries(properties.map((name) => [name, {}])) } } } }, '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }, '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }, '503': { description: 'Service unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } } };
+}
+
+function publicOp(tags: string, summary: string, parameters?: unknown[], requestBody?: unknown, responses?: unknown) {
+  return { tags: [tags], summary, ...(parameters ? { parameters } : {}), ...(requestBody ? { requestBody } : {}), responses: responses ?? objectResponse('OK', []) };
+}
+
+function appOp(tags: string, summary: string, parameters?: unknown[], requestBody?: unknown, responses?: unknown) {
+  return { ...publicOp(tags, summary, parameters, requestBody, responses), security: [{ appApiKey: [] }] };
+}
+
+function adminOp(tags: string, summary: string, parameters?: unknown[], requestBody?: unknown, responses?: unknown) {
+  return { ...publicOp(tags, summary, parameters, requestBody, responses), security: [{ adminApiKey: [] }] };
+}
+
 export function buildOpenApiDocument() {
   return {
     openapi: '3.1.0',
@@ -36,29 +72,84 @@ export function buildOpenApiDocument() {
       '/api/v1/health/live': { get: { tags: ['Health'], summary: 'Liveness health check', responses: { '200': { description: 'Process is alive', content: { 'application/json': { schema: { $ref: '#/components/schemas/Health' } } } } } } },
       '/api/v1/health/ready': { get: { tags: ['Health'], summary: 'Readiness health check', responses: { '200': { description: 'Ready' }, '503': { description: 'Database, migration, worker, or Twitch setup degraded' } } } },
       '/api/v1/health/deep': { get: { tags: ['Health'], summary: 'Deep operational health with Twitch scopes, EventSub, queues, Channel Points, and dead-letter diagnostics', responses: { '200': { description: 'Healthy' }, '503': { description: 'Degraded' } } } },
-      '/api/v1/me': { get: { tags: ['Apps'], security: [{ appApiKey: [] }], summary: 'Return authenticated app identity and permissions', responses: { '200': { description: 'Authenticated app' }, '401': { description: 'Missing, invalid, or revoked API key' } } } },
-      '/api/v1/chat/messages': { post: { tags: ['Chat'], security: [{ appApiKey: [] }], summary: 'Queue an outgoing Twitch chat message with idempotency', requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatMessageRequest' } } } }, responses: { '202': { description: 'Queued or duplicate existing message returned' }, '409': { description: 'Idempotency key reused with different parameters' } } } },
-      '/api/v1/chat/messages/{messageId}': { get: { tags: ['Chat'], security: [{ appApiKey: [] }], summary: 'Get outgoing chat message status', parameters: [{ name: 'messageId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { '200': { description: 'Message status' }, '404': { description: 'Not found' } } } },
-      '/api/v1/events': { get: { tags: ['Apps'], security: [{ appApiKey: [] }], summary: 'List gateway events visible to the app', parameters: [{ name: 'type', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer' } }], responses: { '200': { description: 'Events' } } } },
-      '/api/v1/channel-points/rewards': { get: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'List Channel Point rewards' }, post: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'Create an app-owned Channel Point reward', requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/RewardRequest' } } } }, responses: { '201': { description: 'Created reward' }, '403': { description: 'Missing permission' } } } },
-      '/api/v1/channel-points/rewards/{rewardId}': { get: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'Get reward' }, patch: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'Update a reward owned by this app' }, delete: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'Delete a reward owned by this app' } },
-      '/api/v1/channel-points/rewards/{rewardId}/adopt': { post: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'Adopt/bind an existing manageable reward to the authenticated app' } },
-      '/api/v1/channel-points/rewards/{rewardId}/release': { post: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'Release app ownership without deleting the Twitch reward' } },
-      '/api/v1/channel-points/redemptions': { get: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'List redemptions' } },
-      '/api/v1/channel-points/redemptions/{redemptionId}/status': { post: { tags: ['Channel Points'], security: [{ appApiKey: [] }], summary: 'Fulfill or cancel an app-owned redemption' } },
-      '/api/v1/subscriptions': { get: { tags: ['Twitch Data'], security: [{ appApiKey: [] }], summary: 'List subscription events/backfill rows' } },
-      '/api/v1/subscriptions/backfill': { post: { tags: ['Twitch Data'], security: [{ appApiKey: [] }], summary: 'Run subscription backfill' } },
-      '/api/v1/bits/leaderboard': { get: { tags: ['Twitch Data'], security: [{ appApiKey: [] }], summary: 'Read Bits leaderboard/cache' } },
-      '/api/v1/bits/backfill': { post: { tags: ['Twitch Data'], security: [{ appApiKey: [] }], summary: 'Run Bits backfill' } },
-      '/api/v1/streams/current': { get: { tags: ['Twitch Data'], security: [{ appApiKey: [] }], summary: 'Current stream status' } },
-      '/api/v1/channels/{channelId}/profile': { get: { tags: ['Twitch Data'], security: [{ appApiKey: [] }], summary: 'Broadcaster/channel profile' } },
-      '/api/v1/channels/{channelId}/schedule': { get: { tags: ['Twitch Data'], security: [{ appApiKey: [] }], summary: 'Channel stream schedule' } },
-      '/webhooks/twitch/eventsub': { post: { tags: ['Twitch EventSub'], summary: 'Twitch EventSub webhook callback; verifies raw-body HMAC signature, handles challenge/notification/revocation, and deduplicates message IDs', responses: { '200': { description: 'Challenge response' }, '204': { description: 'Notification/revocation accepted or duplicate ignored' }, '403': { description: 'Invalid Twitch signature' } } } },
-      '/api/admin/shell': { get: { tags: ['Admin'], security: [{ adminApiKey: [] }], summary: 'Admin UI shell metadata' } },
-      '/api/admin/apps': { get: { tags: ['Admin'], security: [{ adminApiKey: [] }], summary: 'List registered apps' }, post: { tags: ['Admin'], security: [{ adminApiKey: [] }], summary: 'Register an app' } },
-      '/api/admin/apps/{id}/keys': { post: { tags: ['Admin'], security: [{ adminApiKey: [] }], summary: 'Generate an app API key; raw key is shown once' } },
-      '/api/admin/twitch/setup/status': { get: { tags: ['Admin'], security: [{ adminApiKey: [] }], summary: 'Twitch OAuth/scope setup status' } },
-      '/api/admin/twitch/eventsub/status': { get: { tags: ['Admin'], security: [{ adminApiKey: [] }], summary: 'EventSub subscription diagnostics' } }
+
+      '/api/v1/me': { get: appOp('Apps', 'Return authenticated app identity and permissions', undefined, undefined, objectResponse('Authenticated app', ['app', 'apiKey'])) },
+      '/api/v1/events': { get: appOp('Apps', 'List gateway events visible to the app', queryParams(['type', 'limit']), undefined, objectResponse('Events', ['events'])) },
+      '/api/v1/events/{eventId}': { get: appOp('Apps', 'Get a gateway event by id', [uuidParam('eventId')], undefined, objectResponse('Event', ['event'])) },
+
+      '/api/v1/chat/log': { get: appOp('Chat', 'List chat log entries visible to the app', queryParams(['q', 'command', 'limit']), undefined, objectResponse('Chat log entries', ['messages'])) },
+      '/api/v1/chat/messages': {
+        get: appOp('Chat', 'List outgoing chat messages', queryParams(['status', 'from', 'to', 'limit']), undefined, objectResponse('Outgoing chat messages', ['messages'])),
+        post: appOp('Chat', 'Queue an outgoing Twitch chat message with idempotency', undefined, refBody('#/components/schemas/ChatMessageRequest'), objectResponse('Queued or duplicate existing message returned', ['message', 'duplicate'], '202'))
+      },
+      '/api/v1/chat/messages/{id}': { get: appOp('Chat', 'Get outgoing chat message status', [uuidParam('id')], undefined, objectResponse('Message status', ['message'])) },
+
+      '/api/v1/channel-points/rewards': {
+        get: appOp('Channel Points', 'List Channel Point rewards', queryParams(['include_deleted']), undefined, objectResponse('Rewards', ['rewards'])),
+        post: appOp('Channel Points', 'Create an app-owned Channel Point reward', undefined, refBody('#/components/schemas/RewardRequest'), objectResponse('Created reward', ['reward'], '201'))
+      },
+      '/api/v1/channel-points/rewards/sync': { post: appOp('Channel Points', 'Sync manageable Channel Point rewards from Twitch', undefined, emptyBody(), objectResponse('Reward sync run and rewards', ['run', 'rewards'])) },
+      '/api/v1/channel-points/rewards/{rewardId}': {
+        get: appOp('Channel Points', 'Get a Channel Point reward', [uuidParam('rewardId')], undefined, objectResponse('Reward', ['reward'])),
+        patch: appOp('Channel Points', 'Update a reward owned by this app', [uuidParam('rewardId')], refBody('#/components/schemas/RewardRequest', false), objectResponse('Updated reward', ['reward'])),
+        delete: appOp('Channel Points', 'Delete a reward owned by this app', [uuidParam('rewardId')], undefined, objectResponse('Deleted reward', ['reward']))
+      },
+      '/api/v1/channel-points/rewards/{rewardId}/adopt': { post: appOp('Channel Points', 'Adopt/bind an existing manageable reward to the authenticated app', [uuidParam('rewardId')], schemaBody(['app_ownership_key', 'expected_twitch_reward_id', 'local_reward_type']), objectResponse('Adopted reward', ['reward'])) },
+      '/api/v1/channel-points/rewards/{rewardId}/release': { post: appOp('Channel Points', 'Release app ownership without deleting the Twitch reward', [uuidParam('rewardId')], emptyBody(), objectResponse('Released reward', ['reward'])) },
+      '/api/v1/channel-points/rewards/{rewardId}/redemptions': { get: appOp('Channel Points', 'List or sync redemptions for a reward', [uuidParam('rewardId'), ...queryParams(['status', 'sync', 'limit'])], undefined, objectResponse('Redemptions', ['redemptions'])) },
+      '/api/v1/channel-points/redemptions': { get: appOp('Channel Points', 'List redemptions visible to the app', queryParams(['status', 'limit']), undefined, objectResponse('Redemptions', ['redemptions'])) },
+      '/api/v1/channel-points/rewards/{rewardId}/redemptions/{redemptionId}/status': { patch: appOp('Channel Points', 'Fulfill or cancel an app-owned redemption', [uuidParam('rewardId'), uuidParam('redemptionId')], schemaBody(['status', 'reason'], ['status']), objectResponse('Updated redemption', ['redemption'])) },
+
+      '/api/v1/subscriptions/backfill': { post: appOp('Twitch Data', 'Run subscription backfill', undefined, emptyBody(), objectResponse('Backfill run and subscriptions', ['run', 'subscriptions'])) },
+      '/api/v1/subscriptions': { get: appOp('Twitch Data', 'List subscription events/backfill rows', queryParams(['status', 'limit']), undefined, objectResponse('Subscriptions', ['subscriptions'])) },
+      '/api/v1/bits/backfill': { post: appOp('Twitch Data', 'Run Bits backfill', undefined, schemaBody(['period', 'count']), objectResponse('Backfill run and leaderboard', ['run', 'leaderboard'])) },
+      '/api/v1/bits/leaderboard': { get: appOp('Twitch Data', 'Read Bits leaderboard/cache', queryParams(['period', 'limit']), undefined, objectResponse('Bits leaderboard', ['leaderboard'])) },
+      '/api/v1/channel/status': { get: appOp('Twitch Data', 'Current primary channel live/offline status', undefined, undefined, { '200': { description: 'Channel status object' } }) },
+      '/api/v1/streams/current': { get: appOp('Twitch Data', 'Current stream status', undefined, undefined, objectResponse('Current stream status', ['stream', 'status'])) },
+      '/api/v1/channels': { get: appOp('Twitch Data', 'List known Twitch channels', undefined, undefined, objectResponse('Channels', ['channels'])) },
+      '/api/v1/channels/{channelId}/profile': { get: appOp('Twitch Data', 'Broadcaster/channel profile', [uuidParam('channelId')], undefined, objectResponse('Channel profile', ['profile'])) },
+      '/api/v1/channels/{channelId}/schedule': { get: appOp('Twitch Data', 'Channel stream schedule', [uuidParam('channelId')], undefined, objectResponse('Channel schedule', ['schedule'])) },
+
+      '/api/v1/webhook-deliveries': { get: appOp('Apps', 'List webhook deliveries for the authenticated app', queryParams(['status', 'limit']), undefined, objectResponse('Webhook deliveries', ['deliveries'])) },
+      '/api/v1/webhook-deliveries/{deliveryId}': { get: appOp('Apps', 'Get webhook delivery details and attempts for the authenticated app', [uuidParam('deliveryId')], undefined, objectResponse('Webhook delivery details', ['delivery', 'attempts'])) },
+      '/api/v1/webhook-deliveries/{deliveryId}/retry': { post: appOp('Apps', 'Retry one webhook delivery for the authenticated app', [uuidParam('deliveryId')], emptyBody(), objectResponse('Retried webhook delivery', ['delivery'])) },
+
+      '/api/v1/twitch/oauth/bot/callback': { get: publicOp('Admin', 'Public Twitch OAuth callback alias for bot account', queryParams(['code', 'state', 'error', 'error_description']), undefined, { '302': { description: 'Redirect to admin UI' }, '400': { description: 'Invalid callback' } }) },
+      '/api/v1/twitch/oauth/broadcaster/callback': { get: publicOp('Admin', 'Public Twitch OAuth callback alias for broadcaster account', queryParams(['code', 'state', 'error', 'error_description']), undefined, { '302': { description: 'Redirect to admin UI' }, '400': { description: 'Invalid callback' } }) },
+      '/webhooks/twitch/eventsub': { post: publicOp('Twitch EventSub', 'Twitch EventSub webhook callback; verifies raw-body HMAC signature, handles challenge/notification/revocation, and deduplicates message IDs', undefined, { required: true, content: { 'application/json': { schema: { type: 'object' } } } }, { '200': { description: 'Challenge response' }, '204': { description: 'Notification/revocation accepted or duplicate ignored' }, '400': { description: 'Missing metadata or unsupported message type' }, '403': { description: 'Invalid Twitch signature' } }) },
+
+      '/api/admin/shell': { get: adminOp('Admin', 'Admin UI shell metadata', undefined, undefined, objectResponse('Shell metadata', ['service', 'phase', 'pages', 'adminAuth', 'message'])) },
+      '/api/admin/debug/events': { post: adminOp('Admin', 'Inject a debug event and enqueue matching webhook deliveries', undefined, schemaBody(['type', 'externalId', 'occurredAt', 'payload'], ['type']), objectResponse('Created debug event', ['event', 'deliveries', 'deliveryCount'], '201')) },
+      '/api/admin/diagnostics': { get: adminOp('Admin', 'Operational diagnostics for Twitch data, Channel Points, and recent events', undefined, undefined, objectResponse('Diagnostics', ['twitchData', 'channelPoints', 'recentEvents'])) },
+      '/api/admin/apps': { get: adminOp('Admin', 'List registered apps', undefined, undefined, objectResponse('Apps', ['permissions', 'defaultAppPermissions', 'apps'])), post: adminOp('Admin', 'Register an app', undefined, schemaBody(['name', 'slug', 'description', 'enabled', 'permissions', 'webhookUrl', 'webhookEventFilters'], ['name', 'slug']), objectResponse('Created app', ['app'], '201')) },
+      '/api/admin/apps/{id}': { get: adminOp('Admin', 'Get a registered app', [uuidParam('id')], undefined, objectResponse('App', ['app'])), patch: adminOp('Admin', 'Update a registered app', [uuidParam('id')], schemaBody(['name', 'slug', 'description', 'enabled', 'permissions', 'webhookUrl', 'webhookEventFilters']), objectResponse('Updated app', ['app'])), delete: adminOp('Admin', 'Archive an app and revoke keys/disable webhooks', [uuidParam('id')], undefined, objectResponse('Archived app', ['archived', 'app', 'archivedAt', 'previousSlug', 'archivedSlug'])) },
+      '/api/admin/apps/{id}/keys': { post: adminOp('Admin', 'Generate an app API key; raw key is shown once', [uuidParam('id')], schemaBody(['name']), objectResponse('Created API key', ['apiKey', 'rawKey', 'rawKeyShownOnlyOnce'], '201')) },
+      '/api/admin/apps/{id}/keys/{keyId}': { delete: adminOp('Admin', 'Revoke an app API key', [uuidParam('id'), uuidParam('keyId')], undefined, objectResponse('Revoked API key', ['apiKey'])) },
+      '/api/admin/apps/{id}/webhook-secret': { post: adminOp('Admin', 'Rotate the default app webhook signing secret; raw secret is shown once', [uuidParam('id')], emptyBody(), objectResponse('Rotated webhook secret', ['webhook', 'rawSecret', 'rawSecretShownOnlyOnce'])) },
+      '/api/admin/apps/{id}/webhook-test': { post: adminOp('Admin', 'Send a test webhook delivery for an app', [uuidParam('id')], emptyBody(), objectResponse('Test webhook delivery', ['delivery'])) },
+      '/api/admin/twitch/primary-channel/command-prefix': { get: adminOp('Admin', 'Get primary Twitch channel command prefix', undefined, undefined, objectResponse('Command prefix', ['channelId', 'commandPrefix'])), patch: adminOp('Admin', 'Update primary Twitch channel command prefix', undefined, schemaBody(['commandPrefix'], ['commandPrefix']), objectResponse('Updated command prefix', ['channelId', 'commandPrefix'])) },
+      '/api/admin/text-commands': { get: adminOp('Admin', 'List text commands', undefined, undefined, objectResponse('Text commands', ['commands'])), post: adminOp('Admin', 'Create a text command', undefined, schemaBody(['channelId', 'command', 'aliases', 'responseText', 'enabled', 'requiredRole', 'cooldownSeconds', 'userCooldownSeconds', 'replyMode'], ['command', 'responseText']), objectResponse('Created text command', ['command'], '201')) },
+      '/api/admin/text-commands/{id}': { get: adminOp('Admin', 'Get a text command and invocations', [uuidParam('id')], undefined, objectResponse('Text command', ['command', 'invocations'])), patch: adminOp('Admin', 'Update a text command', [uuidParam('id')], schemaBody(['channelId', 'command', 'aliases', 'responseText', 'enabled', 'requiredRole', 'cooldownSeconds', 'userCooldownSeconds', 'replyMode']), objectResponse('Updated text command', ['command'])), delete: adminOp('Admin', 'Archive a text command', [uuidParam('id')], undefined, objectResponse('Archived text command', ['command'])) },
+      '/api/admin/text-commands/{id}/test': { post: adminOp('Admin', 'Test a text command', [uuidParam('id')], schemaBody(['user', 'displayName', 'channel']), { '200': { description: 'Text command test result' } }) },
+      '/api/admin/chat/log': { get: adminOp('Admin', 'List chat log entries', queryParams(['q', 'command', 'limit']), undefined, objectResponse('Chat log entries', ['messages'])) },
+      '/api/admin/outgoing-chat/messages': { get: adminOp('Admin', 'List outgoing chat queue messages', queryParams(['status', 'from', 'to', 'limit']), undefined, objectResponse('Outgoing messages', ['messages'])) },
+      '/api/admin/outgoing-chat/messages/{messageId}': { get: adminOp('Admin', 'Get outgoing chat queue message', [uuidParam('messageId')], undefined, objectResponse('Outgoing message', ['message'])) },
+      '/api/admin/outgoing-chat/messages/{messageId}/retry': { post: adminOp('Admin', 'Retry an outgoing chat queue message', [uuidParam('messageId')], emptyBody(), objectResponse('Retried outgoing message', ['message'])) },
+      '/api/admin/webhook-deliveries': { get: adminOp('Admin', 'List webhook deliveries across apps', queryParams(['status', 'limit']), undefined, objectResponse('Webhook deliveries', ['deliveries'])) },
+      '/api/admin/webhook-deliveries/{deliveryId}': { get: adminOp('Admin', 'Get webhook delivery details and attempts', [uuidParam('deliveryId')], undefined, objectResponse('Webhook delivery details', ['delivery', 'attempts'])) },
+      '/api/admin/webhook-deliveries/{deliveryId}/retry': { post: adminOp('Admin', 'Retry a webhook delivery', [uuidParam('deliveryId')], emptyBody(), objectResponse('Retried webhook delivery', ['delivery'])) },
+      '/api/admin/channel-points': { get: adminOp('Admin', 'List Channel Points rewards, redemptions, and diagnostics', queryParams(['includeDeleted', 'redemptionQ', 'redemptionStatus', 'redemptionLimit']), undefined, objectResponse('Channel Points admin state', ['rewards', 'redemptions', 'diagnostics'])) },
+      '/api/admin/channel-points/rewards/sync': { post: adminOp('Admin', 'Sync Channel Points rewards as admin', undefined, emptyBody(), objectResponse('Reward sync run and rewards', ['run', 'rewards'])) },
+      '/api/admin/channel-points/rewards/{rewardId}': { patch: adminOp('Admin', 'Admin update a Channel Point reward', [uuidParam('rewardId')], schemaBody(['title', 'cost', 'prompt', 'owning_app_id', 'is_enabled', 'background_color', 'is_user_input_required', 'should_redemptions_skip_request_queue']), objectResponse('Updated reward', ['reward'])), delete: adminOp('Admin', 'Admin delete a Channel Point reward', [uuidParam('rewardId')], undefined, objectResponse('Deleted reward', ['reward'])) },
+      '/api/admin/twitch/bot/login/start': { post: adminOp('Admin', 'Start Twitch OAuth for bot account', undefined, schemaBody(['returnTo']), { '200': { description: 'OAuth authorization URL and state' } }) },
+      '/api/admin/twitch/bot/callback': { get: publicOp('Admin', 'Twitch OAuth callback for bot account', queryParams(['code', 'state', 'error', 'error_description']), undefined, { '302': { description: 'Redirect to admin UI' }, '400': { description: 'Invalid callback' } }) },
+      '/api/admin/twitch/broadcaster/login/start': { post: adminOp('Admin', 'Start Twitch OAuth for broadcaster account', undefined, schemaBody(['returnTo']), { '200': { description: 'OAuth authorization URL and state' } }) },
+      '/api/admin/twitch/broadcaster/callback': { get: publicOp('Admin', 'Twitch OAuth callback for broadcaster account', queryParams(['code', 'state', 'error', 'error_description']), undefined, { '302': { description: 'Redirect to admin UI' }, '400': { description: 'Invalid callback' } }) },
+      '/api/admin/twitch/setup/status': { get: adminOp('Admin', 'Twitch OAuth/scope setup status', undefined, undefined, { '200': { description: 'Twitch setup status' } }) },
+      '/api/admin/twitch/tokens/refresh': { post: adminOp('Admin', 'Refresh Twitch user tokens', undefined, schemaBody(['role']), objectResponse('Token refresh results', ['results'])) },
+      '/api/admin/twitch/eventsub/sync': { post: adminOp('Twitch EventSub', 'Reconcile Twitch EventSub subscriptions', undefined, emptyBody(), objectResponse('EventSub reconciliation result', ['result'])) },
+      '/api/admin/twitch/eventsub/status': { get: adminOp('Twitch EventSub', 'EventSub subscription diagnostics', undefined, undefined, { '200': { description: 'EventSub diagnostics' } }) },
+      '/api/admin/twitch/eventsub/live': { get: adminOp('Twitch EventSub', 'Live EventSub callback diagnostics', undefined, undefined, { '200': { description: 'Live EventSub diagnostics' } }) }
     }
   };
 }
