@@ -51,13 +51,16 @@ npm run build
 docker build -t erwin-gateway:local .
 ```
 
-## Deployment and migration docs
+## Which doc to read
 
-- `docs/README.deployment.md` — TrueNAS SCALE deployment, migrations, health checks, and operations.
-- `docs/README.integration.md` — registering apps, creating API keys, calling app APIs, webhook verification, idempotency, and retry/dead-letter behavior.
-- `docs/README.twitch-auth.md` — Twitch app setup, bot/broadcaster OAuth, exact scopes by feature, and EventSub callback requirements.
-- `docs/README.migration-erwin-music.md` — replacing IRC receive/send, music command intake, simple commands, and stream polling.
-- `docs/README.migration-erwin-hatchery.md` — replacing rewards, redemptions, subscriptions, Bits, stream/profile/schedule calls.
+- OpenAPI (`GET /openapi.json`, `GET /docs`, source: `apps/api/src/modules/docs/openapi.ts`) — exact route contract, auth schemes, parameters, and request/response summaries.
+- `docs/README.integration.md` — app integration source of truth: app registration, bearer API keys, permissions, webhook signing, idempotency, Channel Point adopt/release, redemption status, payload examples, client examples, and delivery retry/dead-letter behavior.
+- `docs/05_API_CONTRACT.md` — compact endpoint inventory and API conventions.
+- `docs/README.migration-erwin-music.md` — `erwin-music` cutover checklist, exact event filters, smoke tests, rollback, and app-specific domain boundaries.
+- `docs/README.migration-erwin-hatchery.md` — Hatchery cutover checklist, exact event filters, reward adoption decisions, smoke tests, rollback, and app-specific domain boundaries.
+- `docs/README.deployment.md` / `docs/10_DEPLOYMENT_TRUENAS.md` — TrueNAS/runtime deployment, health checks, migrations, and operations.
+- `docs/11_SECURITY.md` — auth, secrets, admin boundary, and security model.
+- `docs/README.twitch-auth.md` / `docs/04_TWITCH_AUTH_AND_SCOPES.md` — Twitch app setup, bot/broadcaster OAuth, required scopes, and EventSub callback requirements.
 - `truenas-deployment.yml` — production TrueNAS SCALE deployment file.
 
 ## Naming

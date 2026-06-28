@@ -1,7 +1,6 @@
 # erwin-gateway integration guide
 
-This guide is enough for a new internal app to authenticate with `erwin-gateway`, call app APIs, send chat, and receive signed webhooks.
-
+This guide is the human-readable app integration source of truth. Keep permission matrices, app authentication, bearer API key handling, webhook signing, idempotency, Channel Point adopt/release, redemption status, payload examples, client examples, and delivery retry/dead-letter behavior here. Use `GET /openapi.json` or `GET /docs` for the exact machine-readable route contract.
 
 Admin API examples in this guide assume the MVP admin authentication model: `INTERNAL_ADMIN_API_KEY` is configured on the gateway, and operators pass that same secret as either `X-Admin-API-Key: <admin-key>` or `Authorization: Bearer <admin-key>`. The only unauthenticated `/api/admin/twitch/*/callback` exception is the Twitch OAuth callback route family used by Twitch browser redirects. Keep the admin UI and admin API behind a reverse proxy, VPN/private network, IP allowlist, or equivalent boundary; do not publish them as open internet surfaces.
 
@@ -181,6 +180,7 @@ Common event types and filters:
 - `GET /api/v1/health/live` confirms the process is running.
 - `GET /api/v1/health/ready` confirms database/Twitch readiness.
 - `GET /api/v1/health/deep` includes scope, EventSub, queue, Channel Point, Bits/subscription, and dead-letter diagnostics.
+- Inspect degraded checks in the Admin UI diagnostics, Twitch/EventSub status pages, webhook delivery views, outgoing chat queue views, and dead-letter records; app-scoped delivery failures are also visible through `/api/v1/webhook-deliveries`.
 
 ## 6. Downstream client implementation examples
 
@@ -484,7 +484,7 @@ Required permissions:
 - `channel_points:redemptions:read` to list or inspect redemptions.
 - `channel_points:redemptions:manage` to fulfill or cancel redemptions.
 
-### 6.6 Inspect and retry webhook deliveries
+### 6.7 Inspect and retry webhook deliveries
 
 Downstream apps can inspect only their own deliveries through the app-facing `/api/v1/webhook-deliveries` endpoints.
 

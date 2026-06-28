@@ -176,123 +176,21 @@ Run these checks before replacing any direct Twitch code:
 | Bits events/backfill | Bits webhooks + `/api/v1/bits/backfill`, `/api/v1/bits/leaderboard` | `bits:read`, `bits:backfill` | broadcaster `bits:read` |
 | Stream/profile/schedule calls | `/api/v1/streams/current`, `/api/v1/channels/:channelId/profile`, `/api/v1/channels/:channelId/schedule` | `streams:read` | broadcaster setup required for gateway ownership |
 
-## Channel Point reward management
+## App-specific integration notes
 
-Create a reward:
+Use the [integration guide](README.integration.md) as the source of truth for app registration, bearer API keys, webhook raw-body HMAC verification, idempotency, payload examples, client examples, Channel Point adopt/release, and redemption status. Hatchery-specific decisions are:
 
-```bash
-curl -X POST https://gateway.example.com/api/v1/channel-points/rewards \
-  -H 'Authorization: Bearer <erwin-hatchery-api-key>' \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Hatch an egg","cost":1000,"prompt":"Choose your egg"}'
-```
-
-The created reward is owned by `erwin-hatchery`. Only the owning app, or an explicit admin override, can update/delete/status-manage the reward. This prevents another app from mutating Hatchery rewards.
-
-Sync rewards from Twitch when needed:
-
-```text
-POST /api/v1/channel-points/rewards/sync
-```
-
-Rewards found on Twitch without ownership mapping are reported in diagnostics and should be adopted or left admin-managed intentionally.
-
-Adopt an existing Twitch reward after sync when it is a Hatchery economy reward that Hatchery should manage through the gateway:
-
-```bash
-curl -X POST https://gateway.example.com/api/v1/channel-points/rewards/<reward-id>/adopt \
-  -H 'Authorization: Bearer <erwin-hatchery-api-key>' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "app_ownership_key": "hatchery:mystery_egg",
-    "expected_twitch_reward_id": "<twitch-reward-id>",
-    "local_reward_type": "mystery_egg"
-  }'
-```
-
-Release a reward if Hatchery should stop owning it locally but the Twitch reward should remain available for broadcaster/admin management:
-
-```bash
-curl -X POST https://gateway.example.com/api/v1/channel-points/rewards/<reward-id>/release \
-  -H 'Authorization: Bearer <erwin-hatchery-api-key>' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "app_ownership_key": "hatchery:mystery_egg",
-    "expected_twitch_reward_id": "<twitch-reward-id>",
-    "local_reward_type": "mystery_egg"
-  }'
-```
-
-Adoption and release require `channel_points:rewards:adopt` or `channel_points:rewards:update`. Adoption only succeeds for synced, non-deleted, gateway-manageable rewards that are unowned or already owned by `erwin-hatchery`; it rejects rewards owned by another app and rejects mismatched `expected_twitch_reward_id` values. Release clears Hatchery ownership without deleting the Twitch reward, and only Hatchery or an admin override can release a Hatchery-owned reward.
-
-During cutover, adopt rewards that correspond to Hatchery egg, voucher, or economy flows and that Hatchery will update, fulfill/cancel, and lifecycle-manage through the gateway. Leave rewards admin-managed when they are broadcaster-run, shared with another app, not manageable by the gateway Twitch client, or intentionally observed by Hatchery without allowing Hatchery to change reward configuration.
-
-## Redemption events
-
-Subscribe Hatchery webhook filters to:
-
-- `twitch.channel_points.custom_reward_redemption.add`
-- `twitch.channel_points.custom_reward_redemption.update`
-
-Webhook receivers must verify signatures and dedupe by Twitch redemption ID or gateway event ID. Duplicate Twitch EventSub deliveries do not double-grant because the gateway upserts redemptions by Twitch redemption ID.
-
-## Redemption fulfill/cancel
-
-The gateway never auto-fulfills or auto-cancels a redemption. Hatchery decides after its economy logic succeeds or fails:
-
-```bash
-curl -X PATCH https://gateway.example.com/api/v1/channel-points/rewards/<reward-id>/redemptions/<redemption-id>/status \
-  -H 'Authorization: Bearer <erwin-hatchery-api-key>' \
-  -H 'Content-Type: application/json' \
-  -d '{"status":"FULFILLED"}'
-```
-
-Use `CANCELED` when Hatchery intentionally rejects/refunds a redemption. Only the owning app or explicit manage permission can change status.
-
-## Subscriptions
-
-Use EventSub webhooks for live subscription events:
-
-- `twitch.channel.subscribe`
-- `twitch.channel.subscription.end`
-- `twitch.channel.subscription.message`
-- `twitch.channel.subscription.gift`
-
-Use backfill/list endpoints:
-
-```text
-POST /api/v1/subscriptions/backfill
-GET  /api/v1/subscriptions
-```
-
-## Bits
-
-Use EventSub webhook:
-
-```text
-twitch.channel.cheer
-```
-
-Use backfill/list endpoints:
-
-```text
-POST /api/v1/bits/backfill
-GET  /api/v1/bits/leaderboard
-```
-
-## Stream/profile/schedule calls
-
-Replace direct Twitch API calls with:
-
-```text
-GET /api/v1/streams/current
-GET /api/v1/channels/:channelId/profile
-GET /api/v1/channels/:channelId/schedule
-```
+- Exact filters remain `twitch.channel_points.custom_reward_redemption.add`, `twitch.channel_points.custom_reward_redemption.update`, `twitch.channel.subscribe`, `twitch.channel.subscription.end`, `twitch.channel.subscription.message`, `twitch.channel.subscription.gift`, `twitch.channel.cheer`, `twitch.stream.online`, `twitch.stream.offline`, and `twitch.channel.update`; avoid wildcard filters in production.
+- Persist gateway reward IDs, Twitch reward IDs, and ownership metadata so Hatchery mutates only its own rewards.
+- Adopt existing Twitch rewards only when they correspond to Hatchery egg, voucher, or economy flows and Hatchery will manage title, cost, enabled state, fulfillment/cancelation, and lifecycle through the gateway. Leave broadcaster-run, shared, unmanaged, or observed-only rewards admin-managed. See [adopt/release examples](README.integration.md#65-adopt-or-release-existing-channel-point-rewards).
+- The gateway never auto-fulfills or auto-cancels redemptions. Hatchery must call `PATCH /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status` with `FULFILLED` after ledger success or `CANCELED` for intentional rejection/refund. See [redemption status examples](README.integration.md#66-fulfill-or-cancel-channel-point-redemptions).
+- Dedupe redemption webhooks by gateway `event_id` and Twitch redemption ID before granting eggs, vouchers, currency, or inventory items; duplicate EventSub deliveries do not double-grant because the gateway upserts redemptions by Twitch redemption ID.
+- Keep all egg/voucher economy decisions, ledger writes, inventory effects, and refund policy in Hatchery.
+- Replace direct subscription/Bits receivers and backfill calls with the gateway endpoints listed in the replacement map; replace direct stream/profile/schedule Helix calls with the gateway read endpoints.
 
 ## Failure behavior
 
-- Webhook deliveries retry and dead-letter when Hatchery is unavailable or returns non-2xx.
+- Webhook deliveries retry and dead-letter when Hatchery is unavailable or returns non-2xx; inspect app-owned delivery diagnostics with `/api/v1/webhook-deliveries` or the Admin UI.
 - Hatchery should durably record/dedupe an event before returning `2xx`.
 - EventSub revocations and missing scopes degrade health; reconnect broadcaster OAuth and run EventSub sync.
 - Reward ownership violations return `403` rather than mutating another app's reward.
