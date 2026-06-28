@@ -22,9 +22,10 @@ GET /docs
 ## Chat
 
 ```text
+GET  /api/v1/chat/log?q=&command=&limit=
+GET  /api/v1/chat/messages?status=&from=&to=&limit=
 POST /api/v1/chat/messages
 GET  /api/v1/chat/messages/:id
-GET  /api/v1/chat/messages?status=&from=&to=
 ```
 
 Example request:
@@ -68,14 +69,16 @@ GET /api/v1/channels/:channelId/schedule
 ## Channel Points
 
 ```text
-GET    /api/v1/channel-points/rewards
+GET    /api/v1/channel-points/rewards?include_deleted=
 POST   /api/v1/channel-points/rewards
+POST   /api/v1/channel-points/rewards/sync
 GET    /api/v1/channel-points/rewards/:rewardId
 PATCH  /api/v1/channel-points/rewards/:rewardId
 DELETE /api/v1/channel-points/rewards/:rewardId
-POST   /api/v1/channel-points/rewards/sync
-GET    /api/v1/channel-points/rewards/:rewardId/redemptions
-GET    /api/v1/channel-points/redemptions
+POST   /api/v1/channel-points/rewards/:rewardId/adopt
+POST   /api/v1/channel-points/rewards/:rewardId/release
+GET    /api/v1/channel-points/rewards/:rewardId/redemptions?status=&sync=&limit=
+GET    /api/v1/channel-points/redemptions?status=&limit=
 PATCH  /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status
 ```
 
@@ -138,26 +141,42 @@ Access to logs must be permission-based. Apps should see their own deliveries an
 ## Admin/setup API
 
 ```text
-GET  /api/admin/status
-GET  /api/admin/diagnostics
-GET  /api/admin/apps
-POST /api/admin/apps
-GET  /api/admin/apps/:id
-PATCH /api/admin/apps/:id
-POST /api/admin/apps/:id/keys
+GET    /api/admin/shell
+POST   /api/admin/debug/events
+GET    /api/admin/diagnostics
+GET    /api/admin/apps
+POST   /api/admin/apps
+GET    /api/admin/apps/:id
+PATCH  /api/admin/apps/:id
+DELETE /api/admin/apps/:id
+POST   /api/admin/apps/:id/keys
 DELETE /api/admin/apps/:id/keys/:keyId
-POST /api/admin/apps/:id/webhook-test
-GET  /api/admin/twitch/setup/status
-POST /api/admin/twitch/bot/login/start
-GET  /api/admin/twitch/bot/callback
-POST /api/admin/twitch/broadcaster/login/start
-GET  /api/admin/twitch/broadcaster/callback
-POST /api/admin/twitch/eventsub/sync
-POST /api/admin/twitch/tokens/refresh
-GET  /api/admin/queues/outgoing-chat
-GET  /api/admin/queues/webhooks
-POST /api/admin/queues/outgoing-chat/:id/retry
-POST /api/admin/queues/webhooks/:id/retry
+POST   /api/admin/apps/:id/webhook-secret
+POST   /api/admin/apps/:id/webhook-test
+GET    /api/admin/twitch/setup/status
+POST   /api/admin/twitch/bot/login/start
+GET    /api/admin/twitch/bot/callback
+POST   /api/admin/twitch/broadcaster/login/start
+GET    /api/admin/twitch/broadcaster/callback
+GET    /api/v1/twitch/oauth/bot/callback
+GET    /api/v1/twitch/oauth/broadcaster/callback
+POST   /api/admin/twitch/eventsub/sync
+GET    /api/admin/twitch/eventsub/status
+GET    /api/admin/twitch/eventsub/live
+POST   /api/admin/twitch/tokens/refresh
+GET    /api/admin/twitch/primary-channel/command-prefix
+PATCH  /api/admin/twitch/primary-channel/command-prefix
+GET    /api/admin/chat/log?q=&command=&limit=
+GET    /api/admin/outgoing-chat/messages?status=&from=&to=&limit=
+GET    /api/admin/outgoing-chat/messages/:messageId
+POST   /api/admin/outgoing-chat/messages/:messageId/retry
+GET    /api/admin/webhook-deliveries?status=&limit=
+GET    /api/admin/webhook-deliveries/:deliveryId
+POST   /api/admin/webhook-deliveries/:deliveryId/retry
+GET    /api/admin/channel-points?includeDeleted=&redemptionQ=&redemptionStatus=&redemptionLimit=
+POST   /api/admin/channel-points/rewards/sync
+PATCH  /api/admin/channel-points/rewards/:rewardId
+DELETE /api/admin/channel-points/rewards/:rewardId
 ```
 
 Admin routes may be protected by local admin session, reverse proxy auth, or a strong admin API key in MVP. Do not expose admin routes publicly without auth.
