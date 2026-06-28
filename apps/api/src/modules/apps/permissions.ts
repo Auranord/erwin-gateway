@@ -15,9 +15,7 @@ export const appPermissions = [
   'channel_points:redemptions:manage',
   'channel_points:events:receive',
   'subscriptions:read',
-  'subscriptions:backfill',
   'bits:read',
-  'bits:backfill',
   'streams:read',
   'admin:apps',
   'admin:twitch'
@@ -44,9 +42,7 @@ export const defaultAppPermissions = {
     'channel_points:redemptions:manage',
     'channel_points:events:receive',
     'subscriptions:read',
-    'subscriptions:backfill',
     'bits:read',
-    'bits:backfill',
     'streams:read',
     'events:receive_twitch_events',
     'logs:read_own'

@@ -100,9 +100,7 @@ export function buildOpenApiDocument() {
       '/api/v1/channel-points/redemptions': { get: appOp('Channel Points', 'List redemptions visible to the app', queryParams(['status', 'limit']), undefined, objectResponse('Redemptions', ['redemptions'])) },
       '/api/v1/channel-points/rewards/{rewardId}/redemptions/{redemptionId}/status': { patch: appOp('Channel Points', 'Fulfill or cancel an app-owned redemption', [uuidParam('rewardId'), uuidParam('redemptionId')], schemaBody(['status', 'reason'], ['status']), objectResponse('Updated redemption', ['redemption'])) },
 
-      '/api/v1/subscriptions/backfill': { post: appOp('Twitch Data', 'Run subscription backfill', undefined, emptyBody(), objectResponse('Backfill run and subscriptions', ['run', 'subscriptions'])) },
-      '/api/v1/subscriptions': { get: appOp('Twitch Data', 'List subscription events/backfill rows', queryParams(['status', 'limit']), undefined, objectResponse('Subscriptions', ['subscriptions'])) },
-      '/api/v1/bits/backfill': { post: appOp('Twitch Data', 'Run Bits backfill', undefined, schemaBody(['period', 'count']), objectResponse('Backfill run and leaderboard', ['run', 'leaderboard'])) },
+      '/api/v1/subscriptions': { get: appOp('Twitch Data', 'List subscription rows updated by EventSub or manual data repair', queryParams(['status', 'limit']), undefined, objectResponse('Subscriptions', ['subscriptions'])) },
       '/api/v1/bits/leaderboard': { get: appOp('Twitch Data', 'Read Bits leaderboard/cache', queryParams(['period', 'limit']), undefined, objectResponse('Bits leaderboard', ['leaderboard'])) },
       '/api/v1/channel/status': { get: appOp('Twitch Data', 'Current primary channel live/offline status', undefined, undefined, { '200': { description: 'Channel status object' } }) },
       '/api/v1/streams/current': { get: appOp('Twitch Data', 'Current stream status', undefined, undefined, objectResponse('Current stream status', ['stream', 'status'])) },

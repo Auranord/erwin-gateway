@@ -109,9 +109,9 @@ The gateway must support the following current Hatchery Twitch functions:
   - `channel.subscription.end`
   - `channel.subscription.message`
   - `channel.subscription.gift`
-- Active subscription backfill through Helix subscriptions API.
+- Subscription reads from live EventSub-maintained gateway state; historical feed completion is manual/operator-owned.
 - Bits cheer event ingestion through EventSub `channel.cheer`.
-- Bits leaderboard baseline backfill.
+- Bits leaderboard reads from gateway state; historical feed completion is manual/operator-owned.
 - Stream live state and viewer count for incubation multiplier.
 - Public broadcaster profile for stream panel.
 - Public schedule panel data.

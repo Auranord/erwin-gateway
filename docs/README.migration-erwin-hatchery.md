@@ -10,7 +10,7 @@
 - [ ] Complete Twitch Setup for the broadcaster account with Channel Point, subscription, Bits, stream, profile, and schedule access.
 - [ ] Confirm EventSub reconciliation is healthy for Channel Point redemption add/update, subscription, Bits, stream, and channel-update events before changing Hatchery.
 - [ ] Confirm the gateway can read, create, update, delete, and sync Channel Point rewards for the broadcaster.
-- [ ] Confirm the gateway backfill workers and queues are enabled for subscriptions and Bits.
+- [ ] Confirm any historical subscription/Bits feed completion will be handled manually outside the gateway.
 
 ### Phase 1 — Downstream app registration
 
@@ -35,9 +35,7 @@ Example admin API registration payload:
     "channel_points:redemptions:manage",
     "channel_points:events:receive",
     "subscriptions:read",
-    "subscriptions:backfill",
     "bits:read",
-    "bits:backfill",
     "streams:read",
     "events:receive_twitch_events",
     "logs:read_own"
@@ -63,8 +61,8 @@ Example admin API registration payload:
 - [ ] Grant `channel_points:rewards:read`, `channel_points:rewards:create`, `channel_points:rewards:update`, and `channel_points:rewards:delete` for gateway-owned reward management.
 - [ ] Grant `channel_points:redemptions:read` and `channel_points:redemptions:manage` for redemption inspection and explicit fulfill/cancel decisions.
 - [ ] Grant `channel_points:events:receive` for Channel Point redemption webhooks.
-- [ ] Grant `subscriptions:read` and `subscriptions:backfill` for live subscription delivery and repair/backfill runs.
-- [ ] Grant `bits:read` and `bits:backfill` for live cheer delivery and Bits leaderboard repair/backfill runs.
+- [ ] Grant `subscriptions:read` for live subscription delivery and reads.
+- [ ] Grant `bits:read` for live cheer delivery and Bits leaderboard reads.
 - [ ] Grant `streams:read` for stream, channel profile, and schedule reads plus stream/channel-update webhook delivery.
 - [ ] Grant `chat:messages:send` only if Hatchery still emits chat confirmations through the gateway.
 - [ ] Grant `events:receive_twitch_events` and `logs:read_own` only for the current diagnostics and app-owned event visibility needed by Hatchery operators.
@@ -111,8 +109,8 @@ Run these checks before replacing any direct Twitch code:
 - [ ] Reward list: `GET https://gateway.example.com/api/v1/channel-points/rewards` succeeds with the Hatchery API key.
 - [ ] Reward sync: `POST https://gateway.example.com/api/v1/channel-points/rewards/sync` succeeds and reports any unclaimed Twitch rewards.
 - [ ] Redemption list: `GET https://gateway.example.com/api/v1/channel-points/redemptions` succeeds without exposing another app's resources.
-- [ ] Subscriptions list/backfill: `GET https://gateway.example.com/api/v1/subscriptions` and a dry-run or limited `POST /api/v1/subscriptions/backfill` succeed.
-- [ ] Bits leaderboard/backfill: `GET https://gateway.example.com/api/v1/bits/leaderboard` and a dry-run or limited `POST /api/v1/bits/backfill` succeed.
+- [ ] Subscriptions list: `GET https://gateway.example.com/api/v1/subscriptions` succeeds.
+- [ ] Bits leaderboard: `GET https://gateway.example.com/api/v1/bits/leaderboard` succeeds.
 - [ ] Stream/profile/schedule reads: `GET /api/v1/streams/current`, `GET /api/v1/channels/:channelId/profile`, and `GET /api/v1/channels/:channelId/schedule` succeed.
 - [ ] Webhook test: trigger the Admin UI webhook test for `erwin-hatchery` and verify the downstream app validates `X-Erwin-Gateway-Signature` against the raw request body.
 - [ ] Delivery diagnostics: verify successful test deliveries appear in the Admin UI and no dead-lettered deliveries are created.
@@ -126,7 +124,7 @@ Run these checks before replacing any direct Twitch code:
 - [ ] Dedupe redemption webhooks by gateway `event_id` and Twitch redemption ID before granting eggs, vouchers, currency, or inventory items.
 - [ ] Replace direct redemption fulfill/cancel calls with `PATCH /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status` after Hatchery writes its economy ledger transaction or intentionally rejects/refunds.
 - [ ] Replace direct subscription and Bits EventSub ingestion with the exact gateway webhook event filters listed in Phase 3.
-- [ ] Replace direct subscription and Bits backfill calls with `POST /api/v1/subscriptions/backfill` and `POST /api/v1/bits/backfill`.
+- [ ] Remove direct subscription and Bits backfill calls; handle any feed gaps manually.
 - [ ] Replace direct stream/profile/schedule Helix calls with `GET /api/v1/streams/current`, `GET /api/v1/channels/:channelId/profile`, and `GET /api/v1/channels/:channelId/schedule`.
 - [ ] Remove broadcaster token storage, Twitch token refresh, EventSub subscription reconciliation, and direct EventSub receiver ownership from Hatchery startup once the gateway path is active.
 
@@ -138,9 +136,9 @@ Run these checks before replacing any direct Twitch code:
 - [ ] Disable direct EventSub redemption ingestion after duplicate-count checks pass.
 - [ ] Enable gateway redemption fulfill/cancel for one low-risk reward, then expand to all Hatchery rewards.
 - [ ] Disable direct reward management after all Hatchery rewards are gateway-owned or intentionally left admin-managed.
-- [ ] Disable direct subscription/Bits backfill and event receivers after gateway deliveries and backfills are stable.
+- [ ] Disable direct subscription/Bits event receivers after gateway deliveries are stable.
 - [ ] Disable direct stream/profile/schedule Helix calls after gateway reads are stable.
-- [ ] Monitor gateway webhook delivery queue, Channel Point diagnostics, EventSub health, backfill jobs, and Hatchery ledger logs during the first live stream after cutover.
+- [ ] Monitor gateway webhook delivery queue, Channel Point diagnostics, EventSub health, manual feed-gap checks, and Hatchery ledger logs during the first live stream after cutover.
 
 ### Phase 8 — Rollback steps
 
@@ -148,7 +146,7 @@ Run these checks before replacing any direct Twitch code:
 - [ ] Disable the `erwin-hatchery` app webhook endpoint in the gateway or remove its event filters to stop duplicate delivery.
 - [ ] Pause gateway reward mutations for Hatchery-owned rewards before re-enabling direct Twitch reward mutation.
 - [ ] Re-enable direct redemption fulfill/cancel only after confirming no gateway status update workers are still processing the same redemptions.
-- [ ] Re-enable direct subscription/Bits backfill and stream/profile/schedule calls if those gateway APIs regress.
+- [ ] Re-enable direct stream/profile/schedule calls if those gateway APIs regress; repair subscription/Bits gaps manually.
 - [ ] Keep the API key valid until rollback verification is complete, then revoke only if the gateway path will remain disabled.
 - [ ] Replay or retry only idempotent webhook deliveries after rollback; do not replay redemptions that already wrote Hatchery ledger records.
 
@@ -159,7 +157,7 @@ Run these checks before replacing any direct Twitch code:
 - [ ] Webhook endpoint page shows the production URL and exactly the filters listed in Phase 3.
 - [ ] Webhook Deliveries page shows recent redemption, subscription, Bits, stream, and channel-update deliveries with `2xx` responses.
 - [ ] Channel Points page shows Hatchery rewards mapped to `erwin-hatchery` ownership and no unexpected ownership violations.
-- [ ] Queues page shows no stuck webhook deliveries, reward sync jobs, redemption status updates, subscription backfills, or Bits backfills for Hatchery.
+- [ ] Queues page shows no stuck webhook deliveries, reward sync jobs, redemption status updates, subscription or Bits manual repair items for Hatchery.
 - [ ] Twitch/EventSub health shows the required Channel Point, subscription, Bits, stream, and channel-update subscriptions healthy.
 - [ ] Dead-letter and diagnostics views are empty or contain only acknowledged pre-cutover test records.
 - [ ] Audit logs show Hatchery reward and redemption mutations attributed to the `erwin-hatchery` app key, not an admin key.
@@ -172,8 +170,8 @@ Run these checks before replacing any direct Twitch code:
 | Redemption events | signed webhooks `twitch.channel_points.custom_reward_redemption.add/update` | `channel_points:events:receive` | broadcaster `channel:read:redemptions`, `channel:manage:redemptions` |
 | Redemption fulfill/cancel | `PATCH /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status` | `channel_points:redemptions:manage` | broadcaster `channel:manage:redemptions` |
 | EventSub subscriptions | gateway EventSub reconciliation | none in app | scopes by event type |
-| Subscription events/backfill | subscription webhooks + `/api/v1/subscriptions/backfill` | `subscriptions:read`, `subscriptions:backfill` | broadcaster `channel:read:subscriptions` |
-| Bits events/backfill | Bits webhooks + `/api/v1/bits/backfill`, `/api/v1/bits/leaderboard` | `bits:read`, `bits:backfill` | broadcaster `bits:read` |
+| Subscription events/reads | subscription webhooks + `GET /api/v1/subscriptions` | `subscriptions:read` | broadcaster `channel:read:subscriptions` |
+| Bits events/leaderboard | Bits webhooks + `/api/v1/bits/leaderboard` | `bits:read` | broadcaster `bits:read` |
 | Stream/profile/schedule calls | `/api/v1/streams/current`, `/api/v1/channels/:channelId/profile`, `/api/v1/channels/:channelId/schedule` | `streams:read` | broadcaster setup required for gateway ownership |
 
 ## App-specific integration notes
@@ -186,7 +184,7 @@ Use the [integration guide](README.integration.md) as the source of truth for ap
 - The gateway never auto-fulfills or auto-cancels redemptions. Hatchery must call `PATCH /api/v1/channel-points/rewards/:rewardId/redemptions/:redemptionId/status` with `FULFILLED` after ledger success or `CANCELED` for intentional rejection/refund. See [redemption status examples](README.integration.md#66-fulfill-or-cancel-channel-point-redemptions).
 - Dedupe redemption webhooks by gateway `event_id` and Twitch redemption ID before granting eggs, vouchers, currency, or inventory items; duplicate EventSub deliveries do not double-grant because the gateway upserts redemptions by Twitch redemption ID.
 - Keep all egg/voucher economy decisions, ledger writes, inventory effects, and refund policy in Hatchery.
-- Replace direct subscription/Bits receivers and backfill calls with the gateway endpoints listed in the replacement map; replace direct stream/profile/schedule Helix calls with the gateway read endpoints.
+- Replace direct subscription/Bits receivers with the gateway endpoints listed in the replacement map; replace direct stream/profile/schedule Helix calls with the gateway read endpoints.
 
 ## Failure behavior
 

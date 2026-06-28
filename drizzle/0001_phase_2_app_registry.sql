@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS "admin_audit_log_target_idx" ON "admin_audit_log" ("t
 INSERT INTO "apps" ("name", "slug", "description", "permissions_json")
 VALUES
   ('Erwin Music', 'erwin-music', 'Initial downstream app for music and chat integrations.', '["chat:messages:send","chat:messages:receive","chat:commands:receive","streams:read","logs:read_own"]'::jsonb),
-  ('Erwin Hatchery', 'erwin-hatchery', 'Initial downstream app for channel points, events, subscriptions, bits, and streams.', '["chat:messages:send","channel_points:rewards:read","channel_points:rewards:create","channel_points:rewards:update","channel_points:rewards:delete","channel_points:redemptions:read","channel_points:redemptions:manage","channel_points:events:receive","subscriptions:read","subscriptions:backfill","bits:read","bits:backfill","streams:read","events:receive_twitch_events","logs:read_own"]'::jsonb)
+  ('Erwin Hatchery', 'erwin-hatchery', 'Initial downstream app for channel points, events, subscriptions, bits, and streams.', '["chat:messages:send","channel_points:rewards:read","channel_points:rewards:create","channel_points:rewards:update","channel_points:rewards:delete","channel_points:redemptions:read","channel_points:redemptions:manage","channel_points:events:receive","subscriptions:read","bits:read","streams:read","events:receive_twitch_events","logs:read_own"]'::jsonb)
 ON CONFLICT ("slug") DO UPDATE SET
   "permissions_json" = EXCLUDED."permissions_json",
   "updated_at" = now();

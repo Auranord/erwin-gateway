@@ -37,8 +37,8 @@ Notes:
 - `channel:bot` is required for the cloud chatbot model and proper bot identity.
 - `channel:manage:redemptions` is required because Hatchery creates, updates, deletes, and manages custom rewards.
 - `channel:read:redemptions` is acceptable for read-only redemption events, but the gateway should request `channel:manage:redemptions` for Hatchery support because reward management is MVP.
-- `channel:read:subscriptions` is required for Hatchery subscription events and subscription backfill.
-- `bits:read` is required for Bits cheer events and Bits leaderboard backfill.
+- `channel:read:subscriptions` is required for Hatchery subscription events.
+- `bits:read` is required for Bits cheer events and leaderboard reads.
 
 ## App Access Token
 
@@ -183,7 +183,7 @@ The gateway health checks must report degraded if:
 - `channel:bot` is missing
 - `channel:manage:redemptions` is missing while reward management is enabled
 - neither `channel:read:redemptions` nor `channel:manage:redemptions` is present while redemption events are enabled
-- `channel:read:subscriptions` is missing while subscription events/backfill are enabled
-- `bits:read` is missing while bits events/backfill are enabled
+- `channel:read:subscriptions` is missing while subscription events are enabled
+- `bits:read` is missing while Bits events or leaderboard reads are enabled
 - token refresh fails
 - App Access Token cannot be obtained

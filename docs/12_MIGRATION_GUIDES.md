@@ -110,8 +110,6 @@ Replace:
 - EventSub subscription reconciliation
 - direct Channel Point reward create/list/update/delete calls
 - direct redemption event ingestion
-- direct subscriptions backfill
-- direct bits leaderboard backfill
 - direct stream/profile/schedule Helix calls
 
 With:
@@ -119,7 +117,7 @@ With:
 - gateway Channel Points APIs
 - gateway signed redemption webhooks
 - gateway signed subscription and bits webhooks
-- gateway backfill APIs
+- manual/operator-owned data repair when a downstream feed gap must be filled
 - gateway stream/profile/schedule APIs
 
 Keep in Hatchery:
@@ -191,12 +189,7 @@ twitch.channel.subscription.message
 twitch.channel.subscription.gift
 ```
 
-Use backfill:
-
-```text
-POST /api/v1/subscriptions/backfill
-GET  /api/v1/subscriptions
-```
+Use `GET /api/v1/subscriptions` for the gateway cache. Fill any historical subscription gaps manually in the downstream app or database.
 
 ### Hatchery Bits
 
@@ -206,12 +199,7 @@ Use gateway webhook:
 twitch.channel.cheer
 ```
 
-Use backfill:
-
-```text
-POST /api/v1/bits/backfill
-GET  /api/v1/bits/leaderboard
-```
+Use `GET /api/v1/bits/leaderboard` for the gateway cache. Fill any historical Bits gaps manually in the downstream app or database.
 
 ### Hatchery stream/profile/schedule
 
