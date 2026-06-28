@@ -91,6 +91,53 @@ type AppEditForm = {
 
 type AdminAuthStatus = 'unknown' | 'locked' | 'validating' | 'authenticated';
 
+type DebugEventTemplate = { label: string; type: string; payload: Record<string, unknown> };
+
+const debugEventTemplates: DebugEventTemplate[] = [
+  {
+    label: 'New subscription',
+    type: 'twitch.channel.subscribe',
+    payload: {
+      channel: { id: '123456', login: 'debug_channel', display_name: 'Debug Channel' },
+      actor: { id: '987654', login: 'debug_subscriber', display_name: 'Debug Subscriber' },
+      subscription: { tier: '1000', is_gift: false },
+      twitch: { subscription_type: 'channel.subscribe', subscription_version: '1' }
+    }
+  },
+  {
+    label: 'Gift subscription',
+    type: 'twitch.channel.subscription.gift',
+    payload: {
+      channel: { id: '123456', login: 'debug_channel', display_name: 'Debug Channel' },
+      actor: { id: '987654', login: 'debug_gifter', display_name: 'Debug Gifter' },
+      gift: { total: 5, tier: '1000', cumulative_total: 42, is_anonymous: false },
+      twitch: { subscription_type: 'channel.subscription.gift', subscription_version: '1' }
+    }
+  },
+  {
+    label: 'Bits cheer',
+    type: 'twitch.channel.cheer',
+    payload: {
+      channel: { id: '123456', login: 'debug_channel', display_name: 'Debug Channel' },
+      actor: { id: '987654', login: 'debug_cheerer', display_name: 'Debug Cheerer' },
+      cheer: { bits: 500, message: 'Debug cheer from Erwin Gateway' },
+      twitch: { subscription_type: 'channel.cheer', subscription_version: '1' }
+    }
+  },
+  {
+    label: 'Channel point redemption',
+    type: 'twitch.channel_points.custom_reward_redemption.add',
+    payload: {
+      channel: { id: '123456', login: 'debug_channel', display_name: 'Debug Channel' },
+      actor: { id: '987654', login: 'debug_viewer', display_name: 'Debug Viewer' },
+      redemption: { id: 'debug-redemption', reward_id: 'debug-reward', title: 'Debug Reward', cost: 1000, user_input: 'debug input', status: 'unfulfilled' },
+      twitch: { subscription_type: 'channel.channel_points_custom_reward_redemption.add', subscription_version: '1' }
+    }
+  }
+];
+
+const firstDebugEventTemplate = debugEventTemplates[0]!;
+
 const pages = [
   'Dashboard',
   'Twitch Setup',
@@ -100,6 +147,7 @@ const pages = [
   'Outgoing Messages',
   'Webhook Deliveries',
   'Channel Points',
+  'Debug Events',
   'Diagnostics',
   'Docs'
 ];
@@ -184,6 +232,9 @@ function App() {
     webhookEventFilters: ''
   });
   const [appEditForms, setAppEditForms] = useState<Record<string, AppEditForm>>({});
+  const [debugEventType, setDebugEventType] = useState(firstDebugEventTemplate.type);
+  const [debugEventPayload, setDebugEventPayload] = useState(() => JSON.stringify(firstDebugEventTemplate.payload, null, 2));
+  const [debugEventResult, setDebugEventResult] = useState<string | null>(null);
 
   const visibleApps = useMemo(() => apps.filter((app) => !app.archivedAt), [apps]);
   const activeApps = useMemo(() => visibleApps.filter((app) => app.enabled).length, [visibleApps]);
@@ -582,6 +633,27 @@ function App() {
     await loadTwitchStatus();
   }
 
+
+  function applyDebugEventTemplate(label: string) {
+    const template = debugEventTemplates.find((item) => item.label === label) ?? firstDebugEventTemplate;
+    setDebugEventType(template.type);
+    setDebugEventPayload(JSON.stringify(template.payload, null, 2));
+    setDebugEventResult(null);
+  }
+
+  async function sendDebugEvent() {
+    const parsedPayload = JSON.parse(debugEventPayload) as Record<string, unknown>;
+    const response = await fetch('/api/admin/debug/events', {
+      method: 'POST',
+      headers: adminHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ type: debugEventType.trim(), payload: parsedPayload })
+    });
+    if (!response.ok) throw new Error(`Debug event send failed with ${response.status}`);
+    const payload = await response.json();
+    setDebugEventResult(`Created event ${payload.event?.id ?? 'unknown'} and queued ${payload.deliveryCount ?? 0} downstream delivery record(s).`);
+    if (webhookDeliveriesLoaded) await loadWebhookDeliveries();
+  }
+
   async function refreshTwitchTokens() {
     const response = await fetch('/api/admin/twitch/tokens/refresh', {
       method: 'POST',
@@ -888,6 +960,30 @@ function App() {
             ))}
             {textCommands.length === 0 ? <p>No text commands configured yet. Create <code>!dc</code> above to move a Discord link into the gateway.</p> : null}
           </div>
+        </section>
+
+
+        <section className="page-card" id="debug-events">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Downstream app testing</p>
+              <h2>Debug Events</h2>
+              <p>Create synthetic Twitch-style events and deliver them to registered app webhooks using the same filters, permissions, signing, and delivery queue as live events.</p>
+            </div>
+          </div>
+
+          <form className="create-form debug-event-form" onSubmit={(event) => { event.preventDefault(); void sendDebugEvent().catch((debugError) => setError(String(debugError))); }}>
+            <label>Template
+              <select onChange={(event) => applyDebugEventTemplate(event.target.value)} defaultValue={firstDebugEventTemplate.label}>
+                {debugEventTemplates.map((template) => <option key={template.label} value={template.label}>{template.label}</option>)}
+              </select>
+            </label>
+            <label>Event type<input required value={debugEventType} onChange={(event) => setDebugEventType(event.target.value)} placeholder="twitch.channel.subscribe" /></label>
+            <label className="wide-field">Payload JSON<textarea required value={debugEventPayload} onChange={(event) => setDebugEventPayload(event.target.value)} rows={14} /></label>
+            <button type="submit">Send debug event</button>
+          </form>
+          {debugEventResult ? <p className="success">{debugEventResult}</p> : null}
+          <p className="empty-state">Tip: apps must be enabled, have a webhook URL, match the event filter, and hold the matching permission such as <code>subscriptions:read</code>, <code>bits:read</code>, or <code>events:receive_twitch_events</code>.</p>
         </section>
 
         <section className="page-card twitch-panel" id="diagnostics">
