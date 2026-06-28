@@ -134,7 +134,7 @@ Run these checks before replacing any direct Twitch code:
 
 - [ ] Deploy Hatchery with gateway integration enabled in staging first and old Twitch transport disabled only in staging.
 - [ ] In production, enable gateway webhook ingestion in observe-only mode and compare redemption, subscription, Bits, stream, and channel-update counts with the old path.
-- [ ] Run reward sync, claim or map existing Hatchery rewards, and verify ownership metadata before allowing Hatchery to mutate rewards through the gateway.
+- [ ] Run reward sync, adopt existing Hatchery-owned Twitch rewards that Hatchery will manage through the gateway, and verify ownership metadata before allowing Hatchery to mutate rewards through the gateway.
 - [ ] Disable direct EventSub redemption ingestion after duplicate-count checks pass.
 - [ ] Enable gateway redemption fulfill/cancel for one low-risk reward, then expand to all Hatchery rewards.
 - [ ] Disable direct reward management after all Hatchery rewards are gateway-owned or intentionally left admin-managed.
@@ -195,7 +195,37 @@ Sync rewards from Twitch when needed:
 POST /api/v1/channel-points/rewards/sync
 ```
 
-Rewards found on Twitch without ownership mapping are reported in diagnostics and should be claimed or left admin-managed intentionally.
+Rewards found on Twitch without ownership mapping are reported in diagnostics and should be adopted or left admin-managed intentionally.
+
+Adopt an existing Twitch reward after sync when it is a Hatchery economy reward that Hatchery should manage through the gateway:
+
+```bash
+curl -X POST https://gateway.example.com/api/v1/channel-points/rewards/<reward-id>/adopt \
+  -H 'Authorization: Bearer <erwin-hatchery-api-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "app_ownership_key": "hatchery:mystery_egg",
+    "expected_twitch_reward_id": "<twitch-reward-id>",
+    "local_reward_type": "mystery_egg"
+  }'
+```
+
+Release a reward if Hatchery should stop owning it locally but the Twitch reward should remain available for broadcaster/admin management:
+
+```bash
+curl -X POST https://gateway.example.com/api/v1/channel-points/rewards/<reward-id>/release \
+  -H 'Authorization: Bearer <erwin-hatchery-api-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "app_ownership_key": "hatchery:mystery_egg",
+    "expected_twitch_reward_id": "<twitch-reward-id>",
+    "local_reward_type": "mystery_egg"
+  }'
+```
+
+Adoption and release require `channel_points:rewards:adopt` or `channel_points:rewards:update`. Adoption only succeeds for synced, non-deleted, gateway-manageable rewards that are unowned or already owned by `erwin-hatchery`; it rejects rewards owned by another app and rejects mismatched `expected_twitch_reward_id` values. Release clears Hatchery ownership without deleting the Twitch reward, and only Hatchery or an admin override can release a Hatchery-owned reward.
+
+During cutover, adopt rewards that correspond to Hatchery egg, voucher, or economy flows and that Hatchery will update, fulfill/cancel, and lifecycle-manage through the gateway. Leave rewards admin-managed when they are broadcaster-run, shared with another app, not manageable by the gateway Twitch client, or intentionally observed by Hatchery without allowing Hatchery to change reward configuration.
 
 ## Redemption events
 
