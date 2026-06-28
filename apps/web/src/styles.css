@@ -164,7 +164,8 @@ input {
   font: inherit;
 }
 
-button {
+button,
+.button-link {
   cursor: pointer;
   border: 1px solid rgba(129, 140, 248, 0.45);
   border-radius: 0.75rem;
@@ -174,8 +175,17 @@ button {
   font-weight: 800;
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 button:hover,
-button:focus-visible {
+button:focus-visible,
+.button-link:hover,
+.button-link:focus-visible {
   background: rgba(79, 70, 229, 0.45);
 }
 
