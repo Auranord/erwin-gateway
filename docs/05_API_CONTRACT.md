@@ -210,6 +210,8 @@ DELETE /api/admin/channel-points/rewards/:rewardId
 
 Admin routes may be protected by local admin session, reverse proxy auth, or a strong admin API key in MVP. Do not expose admin routes publicly without auth.
 
+Queue inspection and retry admin endpoints intentionally use the implemented resource-specific route names above: `/api/admin/outgoing-chat/messages*` for outgoing chat messages and `/api/admin/webhook-deliveries*` for webhook deliveries. Do not document `/api/admin/queues/*` as an active route unless queue aliases are intentionally added later.
+
 ## Text command admin API
 
 ```text
