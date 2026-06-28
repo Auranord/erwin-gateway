@@ -1399,12 +1399,41 @@ function App() {
           </div>
         </section>
 
-        {pages.filter((page) => !['Dashboard', 'Apps', 'Twitch Setup', 'Text Commands', 'Diagnostics', 'Chat Log', 'Outgoing Messages', 'Webhook Deliveries', 'Channel Points'].includes(page)).map((page) => (
-          <section className="page-card placeholder" id={page.toLowerCase().replaceAll(' ', '-')} key={page}>
-            <h2>{page}</h2>
-            <p>Operational controls for this area arrive in later phases.</p>
-          </section>
-        ))}
+        <section className="page-card" id="docs">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">API reference and migration runbooks</p>
+              <h2>Docs</h2>
+              <p>Use these docs to integrate apps with the gateway, inspect the API contract, and migrate existing Twitch integrations.</p>
+            </div>
+          </div>
+
+          <div className="diagnostic-grid">
+            <article>
+              <h3>API docs</h3>
+              <p>Open the generated Swagger UI or raw OpenAPI contract served by this gateway instance.</p>
+              <div className="button-row">
+                <a className="button-link" href="/docs" target="_blank" rel="noreferrer">Swagger UI</a>
+                <a className="button-link" href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI JSON</a>
+              </div>
+            </article>
+
+            <article>
+              <h3>Integration guide</h3>
+              <p>Register apps, configure permissions and webhook filters, verify webhook signatures, and handle retries.</p>
+              <a className="button-link" href="/docs/README.integration.md" target="_blank" rel="noreferrer">Open integration guide</a>
+            </article>
+
+            <article>
+              <h3>Migration guides</h3>
+              <p>Follow the app-specific runbooks for moving existing NTKOH Twitch behavior onto the gateway.</p>
+              <div className="button-row">
+                <a className="button-link" href="/docs/README.migration-erwin-music.md" target="_blank" rel="noreferrer">erwin-music</a>
+                <a className="button-link" href="/docs/README.migration-erwin-hatchery.md" target="_blank" rel="noreferrer">erwin-hatchery</a>
+              </div>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
   );
