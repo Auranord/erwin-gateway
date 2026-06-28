@@ -585,3 +585,10 @@ textarea {
 .command-form {
   margin-bottom: 1rem;
 }
+
+.helper-text {
+  margin: 0.25rem 0 0.75rem;
+  color: #a8b3cf;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}

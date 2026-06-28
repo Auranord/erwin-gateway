@@ -150,6 +150,8 @@ const debugEventTemplates: DebugEventTemplate[] = [
 
 const firstDebugEventTemplate = debugEventTemplates[0]!;
 
+const webhookDeliveryRequirementsHelp = 'Webhook delivery requires a configured webhook URL plus app permissions that match the selected events. The API checks both matchesFilters(...) and appCanReceive(...) before queueing deliveries.';
+
 const pages = [
   'Dashboard',
   'Twitch Setup',
@@ -639,6 +641,12 @@ function App() {
     if (!form.name.trim()) throw new Error('App name is required');
     if (!form.slug.trim()) throw new Error('App slug is required');
 
+    const access = deriveAppAccess(form.selectedCapabilities, form.permissions, form.webhookEventFilters);
+    const invalidPermissions = access.permissions.filter((permission) => !permissions.includes(permission));
+    if (invalidPermissions.length > 0) {
+      throw new Error(`Invalid permissions: ${invalidPermissions.join(', ')}`);
+    }
+
     const response = await fetch('/api/admin/apps', {
       method: 'POST',
       headers: adminHeaders({ 'Content-Type': 'application/json' }),
@@ -646,9 +654,9 @@ function App() {
         name: form.name.trim(),
         slug: form.slug.trim(),
         description: form.description.trim(),
-        permissions: deriveAppAccess(form.selectedCapabilities, form.permissions, form.webhookEventFilters).permissions,
+        permissions: access.permissions,
         webhookUrl: form.webhookUrl.trim(),
-        webhookEventFilters: deriveAppAccess(form.selectedCapabilities, form.permissions, form.webhookEventFilters).webhookEventFilters
+        webhookEventFilters: access.webhookEventFilters
       })
     });
     if (!response.ok) throw new Error(`Create app failed with ${response.status}`);
@@ -962,8 +970,10 @@ function App() {
             <label>Slug<input required value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="Example: erwin-hatchery" /></label>
             <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Example: Hatchery reward integration" /></label>
             <label>Webhook URL<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="Example: https://app.example/webhooks/erwin" /></label>
+            <p className="helper-text">{webhookDeliveryRequirementsHelp}</p>
             <fieldset className="permission-picker capability-picker">
               <legend>Capabilities</legend>
+              <p className="helper-text">Selecting capabilities adds both the permissions and webhook event filters required during app creation.</p>
               {appCapabilities.map((capability) => (
                 <label className="checkbox-label capability-label" key={capability.key}>
                   <input type="checkbox" checked={form.selectedCapabilities.includes(capability.key)} onChange={() => toggleCreateAppCapability(capability.key)} />
@@ -974,6 +984,7 @@ function App() {
             <details className="advanced-fields">
               <summary>Advanced permissions and webhook filters</summary>
               <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
+              <p className="helper-text">{webhookDeliveryRequirementsHelp}</p>
               <fieldset className="permission-picker">
                 <legend>Permissions</legend>
                 {permissions.map((permission) => (
@@ -1024,6 +1035,7 @@ function App() {
                         <label>Description<input value={editForm.description} onChange={(event) => updateAppEditField(registeredApp.id, 'description', event.target.value)} /></label>
                         <label>Webhook URL<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="Example: https://app.example/webhooks/erwin" /></label>
                       </div>
+                      <p className="helper-text">{webhookDeliveryRequirementsHelp}</p>
                       <fieldset className="permission-picker capability-picker">
                         <legend>Capabilities</legend>
                         {appCapabilities.map((capability) => (
@@ -1036,6 +1048,7 @@ function App() {
                       <details className="advanced-fields">
                         <summary>Advanced permissions and webhook filters</summary>
                         <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
+                        <p className="helper-text">{webhookDeliveryRequirementsHelp}</p>
                         <fieldset className="permission-picker">
                           <legend>Permissions</legend>
                           {permissions.map((permission) => (
