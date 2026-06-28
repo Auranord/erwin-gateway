@@ -98,12 +98,16 @@ Reward operations must also check ownership:
 
 ## Admin auth
 
-Admin UI must not be public without authentication.
+The current MVP admin API/UI model is intentionally simple and must be deployed behind an operator-controlled boundary:
 
-Acceptable MVP options:
+- `INTERNAL_ADMIN_API_KEY` must be configured before admin routes are usable. Treat it as a production secret and store it in TrueNAS secrets, Bitwarden, or an equivalent secret manager.
+- Admin API clients authenticate with either `X-Admin-API-Key: <key>` or `Authorization: Bearer <key>`. Do not log either header.
+- The only `/api/admin/twitch/*/callback` exception is the Twitch OAuth callback route family, because Twitch redirects the operator's browser back to those endpoints during bot or broadcaster authorization. These callbacks still rely on the OAuth state flow and should only use the configured public gateway origin.
+- The admin UI is not a public application. Do not expose `/`, `/admin`, `/admin/*`, or `/api/admin/*` directly to the internet unless a reverse proxy, VPN, private LAN, SSO/basic-auth layer, IP allowlist, or another network boundary protects access.
 
-- local admin login/session
-- reverse proxy auth plus internal admin API key
-- strong admin API key for early dev
+Expected TrueNAS/reverse proxy posture:
 
-Document whichever option is implemented.
+- Publish only the public HTTPS routes required by external systems, especially `POST /webhooks/twitch/eventsub` and the Twitch OAuth callback URLs configured in Twitch.
+- Keep admin UI and admin API access private, or require reverse-proxy authentication before traffic reaches the gateway.
+- Forward the original host/proto headers consistently so OAuth redirect URLs and generated public URLs match `PUBLIC_APP_URL`/`PUBLIC_API_URL` and `TWITCH_EVENTSUB_CALLBACK_URL`.
+- Rotate `INTERNAL_ADMIN_API_KEY` after suspected exposure and whenever operator access changes.

@@ -2,6 +2,9 @@
 
 This guide is enough for a new internal app to authenticate with `erwin-gateway`, call app APIs, send chat, and receive signed webhooks.
 
+
+Admin API examples in this guide assume the MVP admin authentication model: `INTERNAL_ADMIN_API_KEY` is configured on the gateway, and operators pass that same secret as either `X-Admin-API-Key: <admin-key>` or `Authorization: Bearer <admin-key>`. The only unauthenticated `/api/admin/twitch/*/callback` exception is the Twitch OAuth callback route family used by Twitch browser redirects. Keep the admin UI and admin API behind a reverse proxy, VPN/private network, IP allowlist, or equivalent boundary; do not publish them as open internet surfaces.
+
 ## 1. Register an app
 
 Use the admin UI Apps page or the admin API:
