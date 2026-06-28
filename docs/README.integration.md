@@ -510,6 +510,9 @@ curl -X POST 'https://gateway.example.com/api/v1/webhook-deliveries/<delivery-id
 
 Operational guidance:
 
+- Admin operators inspect and retry webhook deliveries across apps with `GET /api/admin/webhook-deliveries`, `GET /api/admin/webhook-deliveries/:deliveryId`, and `POST /api/admin/webhook-deliveries/:deliveryId/retry`.
+- Admin operators inspect and retry outgoing chat queue messages with `GET /api/admin/outgoing-chat/messages`, `GET /api/admin/outgoing-chat/messages/:messageId`, and `POST /api/admin/outgoing-chat/messages/:messageId/retry`.
+- `/api/admin/queues/*` names are not active routes; only mention them as planned aliases if aliases are intentionally implemented later.
 - Retry only after the app is ready to accept the event and its idempotency table is working.
 - Expect the same `event_id` and domain identifiers again when a delivery is retried.
 - Inspect delivery attempts for HTTP status, error text, and response excerpts before retrying repeatedly.

@@ -69,7 +69,7 @@ Implement:
 - Detect Twitch rewards created by this client but missing local ownership mapping.
 - Detect duplicate Twitch EventSub deliveries.
 - Detect duplicate redemption IDs.
-- Admin retry buttons for failed queues.
+- Admin retry buttons for failed outgoing chat messages and webhook deliveries. These buttons must call the implemented resource routes: `POST /api/admin/outgoing-chat/messages/:messageId/retry` and `POST /api/admin/webhook-deliveries/:deliveryId/retry`. `/api/admin/queues/*` names are not active routes unless aliases are intentionally added later.
 
 Do not silently drop events.
 

@@ -89,6 +89,8 @@ Show:
 
 ### Outgoing Messages
 
+Use the implemented admin routes: `GET /api/admin/outgoing-chat/messages`, `GET /api/admin/outgoing-chat/messages/:messageId`, and `POST /api/admin/outgoing-chat/messages/:messageId/retry`. Do not use `/api/admin/queues/*` names unless planned aliases are intentionally implemented later.
+
 Show:
 
 - queued
@@ -100,6 +102,8 @@ Show:
 - retry button where safe
 
 ### Webhook Deliveries
+
+Use the implemented admin routes: `GET /api/admin/webhook-deliveries`, `GET /api/admin/webhook-deliveries/:deliveryId`, and `POST /api/admin/webhook-deliveries/:deliveryId/retry`. Do not use `/api/admin/queues/*` names unless planned aliases are intentionally implemented later.
 
 Show:
 
