@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { AppConfig } from '../config/env.js';
 import type { Database } from '../db/client.js';
-import { bitsBackfillRuns, bitsLeaderboardEntries, diagnosticEvents, events, subscriptionBackfillRuns, twitchChannels, twitchEventsubMessages, twitchSubscriptions } from '../db/schema.js';
-import { getAppAccessToken, getUserAccessToken } from './twitch/service.js';
+import { bitsLeaderboardEntries, diagnosticEvents, events, twitchChannels, twitchEventsubMessages, twitchSubscriptions } from '../db/schema.js';
+import { getAppAccessToken } from './twitch/service.js';
 import { enqueueWebhookDeliveriesForEvent } from './webhooks/service.js';
 
 export type AppIdentity = { id: string; slug?: string; permissions: string[] } | null;
@@ -32,18 +32,6 @@ async function findOrCreateChannel(db: Database, event: any) {
   return created!;
 }
 async function primaryChannel(db: Database) { const [channel] = await db.select().from(twitchChannels).where(eq(twitchChannels.enabled, true)).limit(1); if (!channel) throw new Error('No Twitch channel is configured'); return channel; }
-
-async function twitchUserFetch(db: Database, config: AppConfig, path: string, scope: string, params: Record<string, string | number | undefined> = {}) {
-  const token = await getUserAccessToken(db, config, 'broadcaster');
-  if (!token.scopes.includes(scope)) throw new Error(`Broadcaster token is missing ${scope}`);
-  const url = new URL(`${helix}${path}`);
-  for (const [key, value] of Object.entries(params)) if (value !== undefined) url.searchParams.set(key, String(value));
-  const response = await fetch(url, { headers: { 'Client-Id': config.TWITCH_CLIENT_ID ?? '', Authorization: `Bearer ${token.accessToken}` } });
-  const text = await response.text();
-  const body = text ? JSON.parse(text) : {};
-  if (!response.ok) throw new Error(`Twitch API ${path} failed with ${response.status}: ${text.slice(0, 500)}`);
-  return body;
-}
 
 async function twitchAppFetch(config: AppConfig, path: string, params: Record<string, string | number | undefined> = {}) {
   const token = await getAppAccessToken(config);
@@ -103,59 +91,11 @@ export async function normalizeTwitchDataEvent(db: Database, params: { rawMessag
   return storeNormalizedEvent(db, { type, externalId: `${type}:${event.id ?? params.rawMessageId}`, channelId: channel.id, payload: { ...base, ...(stream ? { stream } : {}), ...(update ? { update } : {}) }, occurredAt, twitchMessageId: params.rawMessageId, twitchSubscriptionId: subscription.id });
 }
 
-export async function runSubscriptionBackfill(db: Database, config: AppConfig, app: AppIdentity) {
-  const denied = requirePermission(app, 'subscriptions:backfill'); if (denied) return denied;
-  const channel = await primaryChannel(db);
-  const [run] = await db.insert(subscriptionBackfillRuns).values({ channelId: channel.id, requestedByAppId: app?.id ?? null }).returning();
-  try {
-    let cursor: string | undefined;
-    let seen = 0;
-    do {
-      const body = await twitchUserFetch(db, config, '/subscriptions', 'channel:read:subscriptions', { broadcaster_id: channel.broadcasterUserId, first: 100, after: cursor });
-      for (const raw of body.data ?? []) {
-        seen++;
-        const userId = String(raw.user_id);
-        await db.insert(twitchSubscriptions).values({ twitchUserId: userId, channelId: channel.id, userLogin: raw.user_login ?? null, userDisplayName: raw.user_name ?? null, tier: raw.tier ?? null, isGift: Boolean(raw.is_gift), gifterUserId: raw.gifter_id ?? null, gifterLogin: raw.gifter_login ?? null, gifterDisplayName: raw.gifter_name ?? null, status: 'active', lastEventType: 'backfill', rawPayload: raw, lastSyncedAt: new Date() }).onConflictDoUpdate({ target: [twitchSubscriptions.channelId, twitchSubscriptions.twitchUserId], set: { userLogin: raw.user_login ?? null, userDisplayName: raw.user_name ?? null, tier: raw.tier ?? null, isGift: Boolean(raw.is_gift), status: 'active', lastEventType: 'backfill', rawPayload: raw, lastSyncedAt: new Date(), updatedAt: new Date() } });
-      }
-      cursor = body.pagination?.cursor;
-    } while (cursor);
-    const [updated] = await db.update(subscriptionBackfillRuns).set({ status: 'completed', subscriptionsSeen: seen, completedAt: new Date(), cursor: cursor ?? null }).where(eq(subscriptionBackfillRuns.id, run!.id)).returning();
-    return { ok: true as const, run: updated!, subscriptions: await listSubscriptions(db, app, {}) };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'unknown subscription backfill error';
-    const [updated] = await db.update(subscriptionBackfillRuns).set({ status: 'failed', error: message, completedAt: new Date() }).where(eq(subscriptionBackfillRuns.id, run!.id)).returning();
-    await db.insert(diagnosticEvents).values({ severity: 'error', module: 'twitch-data', message: 'Subscription backfill failed', details: { runId: run!.id, error: message } });
-    return { ok: false as const, statusCode: 502, error: message, run: updated };
-  }
-}
-
 export async function listSubscriptions(db: Database, app: AppIdentity, query: { status?: string; limit?: number }) {
   const denied = requirePermission(app, 'subscriptions:read'); if (denied) return denied;
   const channel = await primaryChannel(db);
   const rows = await db.select().from(twitchSubscriptions).where(and(eq(twitchSubscriptions.channelId, channel.id), query.status ? eq(twitchSubscriptions.status, query.status) : undefined)).orderBy(desc(twitchSubscriptions.updatedAt)).limit(Math.min(query.limit ?? 100, 500));
   return { ok: true as const, subscriptions: rows };
-}
-
-export async function runBitsBackfill(db: Database, config: AppConfig, app: AppIdentity, input: { period?: string; count?: number }) {
-  const denied = requirePermission(app, 'bits:backfill'); if (denied) return denied;
-  const channel = await primaryChannel(db);
-  const period = input.period ?? 'all';
-  const [run] = await db.insert(bitsBackfillRuns).values({ channelId: channel.id, requestedByAppId: app?.id ?? null, period }).returning();
-  try {
-    const body = await twitchUserFetch(db, config, '/bits/leaderboard', 'bits:read', { count: Math.min(input.count ?? 100, 100), period });
-    let seen = 0;
-    for (const raw of body.data ?? []) {
-      seen++;
-      await db.insert(bitsLeaderboardEntries).values({ channelId: channel.id, userId: String(raw.user_id), userLogin: raw.user_login ?? null, userDisplayName: raw.user_name ?? null, rank: raw.rank ?? null, score: Number(raw.score ?? 0), period, startedAt: body.date_range?.started_at ? new Date(body.date_range.started_at) : null, endedAt: body.date_range?.ended_at ? new Date(body.date_range.ended_at) : null, rawPayload: raw, lastSyncedAt: new Date() }).onConflictDoUpdate({ target: [bitsLeaderboardEntries.channelId, bitsLeaderboardEntries.userId, bitsLeaderboardEntries.period], set: { userLogin: raw.user_login ?? null, userDisplayName: raw.user_name ?? null, rank: raw.rank ?? null, score: Number(raw.score ?? 0), rawPayload: raw, lastSyncedAt: new Date(), updatedAt: new Date() } });
-    }
-    const [updated] = await db.update(bitsBackfillRuns).set({ status: 'completed', entriesSeen: seen, completedAt: new Date() }).where(eq(bitsBackfillRuns.id, run!.id)).returning();
-    return { ok: true as const, run: updated!, leaderboard: await listBitsLeaderboard(db, app, { period }) };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'unknown bits backfill error';
-    const [updated] = await db.update(bitsBackfillRuns).set({ status: 'failed', error: message, completedAt: new Date() }).where(eq(bitsBackfillRuns.id, run!.id)).returning();
-    await db.insert(diagnosticEvents).values({ severity: 'error', module: 'twitch-data', message: 'Bits backfill failed', details: { runId: run!.id, error: message } });
-    return { ok: false as const, statusCode: 502, error: message, run: updated };
-  }
 }
 
 export async function listBitsLeaderboard(db: Database, app: AppIdentity, query: { period?: string; limit?: number }) {
@@ -199,7 +139,5 @@ export async function twitchDataDiagnostics(db: Database) {
   const [lastSubscriptionEvent] = await db.select().from(events).where(inArray(events.type, ['twitch.channel.subscribe', 'twitch.channel.subscription.end', 'twitch.channel.subscription.message', 'twitch.channel.subscription.gift'])).orderBy(desc(events.occurredAt)).limit(1);
   const [lastBitsEvent] = await db.select().from(events).where(eq(events.type, 'twitch.channel.cheer')).orderBy(desc(events.occurredAt)).limit(1);
   const [lastStreamStatusCheck] = await db.select().from(diagnosticEvents).where(eq(diagnosticEvents.message, 'Stream status checked')).orderBy(desc(diagnosticEvents.createdAt)).limit(1);
-  const lastSubscriptionBackfillRuns = await db.select().from(subscriptionBackfillRuns).orderBy(desc(subscriptionBackfillRuns.startedAt)).limit(5);
-  const lastBitsBackfillRuns = await db.select().from(bitsBackfillRuns).orderBy(desc(bitsBackfillRuns.startedAt)).limit(5);
-  return { lastSubscriptionEvent, lastBitsEvent, lastStreamStatusCheck, lastBackfillRuns: { subscriptions: lastSubscriptionBackfillRuns, bits: lastBitsBackfillRuns }, backfillFailures: { subscriptions: lastSubscriptionBackfillRuns.filter((run) => run.status === 'failed'), bits: lastBitsBackfillRuns.filter((run) => run.status === 'failed') } };
+  return { lastSubscriptionEvent, lastBitsEvent, lastStreamStatusCheck };
 }

@@ -167,8 +167,6 @@ export async function registerHealthRoutes(app: FastifyInstance, options: Health
           lastSubscriptionEvent: twitchData.lastSubscriptionEvent,
           lastBitsEvent: twitchData.lastBitsEvent,
           lastStreamStatusCheck: twitchData.lastStreamStatusCheck,
-          lastBackfillRuns: twitchData.lastBackfillRuns,
-          backfillFailures: twitchData.backfillFailures
         };
         if ((twitch.broadcaster.missingScopes as string[]).includes('channel:read:subscriptions') || (twitch.broadcaster.missingScopes as string[]).includes('bits:read')) status = 'degraded';
         if (outgoingChat.deadLetterCount > 0 || (outgoingChat.oldestQueuedAgeSeconds !== null && outgoingChat.oldestQueuedAgeSeconds > 300)) status = 'degraded';

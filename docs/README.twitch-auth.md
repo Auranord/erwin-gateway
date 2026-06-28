@@ -42,7 +42,7 @@ Required broadcaster scopes by feature:
 | Channel Point reward create/update/delete/sync | `channel:manage:redemptions` |
 | Channel Point redemption events and status reads | `channel:read:redemptions`, `channel:manage:redemptions` |
 | Fulfill/cancel redemptions | `channel:manage:redemptions` |
-| Subscription EventSub/backfill | `channel:read:subscriptions` |
+| Subscription EventSub | `channel:read:subscriptions` |
 | Bits cheer events/leaderboard | `bits:read` |
 | Stream online/offline and stream/profile/schedule reads | no extra user scope for public reads; broadcaster OAuth is still required for gateway ownership and diagnostics |
 

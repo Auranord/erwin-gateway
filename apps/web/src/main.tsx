@@ -182,9 +182,7 @@ const fallbackPermissions = [
   'channel_points:redemptions:manage',
   'channel_points:events:receive',
   'subscriptions:read',
-  'subscriptions:backfill',
   'bits:read',
-  'bits:backfill',
   'streams:read',
   'admin:apps',
   'admin:twitch'
@@ -231,17 +229,15 @@ const appCapabilities: AppCapability[] = [
   {
     key: 'subscriptions',
     label: 'Subscriptions',
-    description: 'Read subscription data, backfill when needed, and receive subscription events.',
+    description: 'Read subscription data and receive subscription events.',
     permissions: ['subscriptions:read'],
-    optionalPermissions: ['subscriptions:backfill'],
     webhookEventFilters: ['twitch.channel.subscribe', 'twitch.channel.subscription.end', 'twitch.channel.subscription.message', 'twitch.channel.subscription.gift']
   },
   {
     key: 'bits',
     label: 'Bits',
-    description: 'Read Bits data, backfill when needed, and receive cheer events.',
+    description: 'Read Bits leaderboard data and receive cheer events.',
     permissions: ['bits:read'],
-    optionalPermissions: ['bits:backfill'],
     webhookEventFilters: ['twitch.channel.cheer']
   },
   {

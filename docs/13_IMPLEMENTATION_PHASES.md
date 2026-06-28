@@ -158,9 +158,9 @@ Acceptance:
 Implement:
 
 - Subscription EventSub events.
-- Subscription backfill endpoint.
+- Subscription read endpoint backed by live EventSub state; no automatic historical backfill.
 - Bits cheer events.
-- Bits leaderboard backfill.
+- Bits leaderboard read endpoint; no automatic historical backfill.
 - Stream status endpoint.
 - Profile endpoint.
 - Schedule endpoint.

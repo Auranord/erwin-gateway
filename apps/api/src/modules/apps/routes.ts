@@ -6,7 +6,7 @@ import { appApiKeys, apps } from '../../db/schema.js';
 import { createOutgoingChatMessage, getOutgoingChatMessage, listOutgoingChatMessages } from '../twitch-chat/service.js';
 import { adoptReward, createReward, deleteReward, fetchRedemptionsFromTwitch, getReward, listRedemptions, listRewards, releaseReward, syncRewards, updateRedemptionStatus, updateReward } from '../channel-points/service.js';
 import { deliverWebhookNow, getEvent, getWebhookDeliveryWithAttempts, listChatLog, listEvents, listWebhookDeliveries } from '../webhooks/service.js';
-import { getChannelProfile, getChannelSchedule, getCurrentStream, listBitsLeaderboard, listChannels, listSubscriptions, runBitsBackfill, runSubscriptionBackfill } from '../twitch-data.js';
+import { getChannelProfile, getChannelSchedule, getCurrentStream, listBitsLeaderboard, listChannels, listSubscriptions } from '../twitch-data.js';
 import { z } from 'zod';
 import { extractKeyPrefix, hashAppApiKey, safeCompareHashes } from './api-keys.js';
 
@@ -325,15 +325,6 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
     return { redemption: result.redemption };
   });
 
-
-  app.post('/api/v1/subscriptions/backfill', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
-    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
-    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
-    const result = await runSubscriptionBackfill(options.db, options.config, authenticatedApp);
-    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error, run: 'run' in result ? result.run : undefined });
-    return { run: result.run, subscriptions: result.subscriptions.ok ? result.subscriptions.subscriptions : [] };
-  });
-
   app.get('/api/v1/subscriptions', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
     if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
     const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
@@ -342,16 +333,6 @@ export async function registerAppApiRoutes(app: FastifyInstance, options: AppRou
     const result = await listSubscriptions(options.db, authenticatedApp, query.data);
     if (!result.ok) return reply.code(result.statusCode).send(gatewayErrorBody(result));
     return { subscriptions: result.subscriptions };
-  });
-
-  app.post('/api/v1/bits/backfill', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {
-    if (!options.db) return reply.code(503).send({ error: 'Database is not configured' });
-    const authenticatedApp = (request as AuthenticatedAppRequest).authenticatedApp!;
-    const body = z.object({ period: z.enum(['day', 'week', 'month', 'year', 'all']).optional(), count: z.number().int().positive().max(100).optional() }).safeParse(request.body ?? {});
-    if (!body.success) return reply.code(400).send({ error: 'Invalid bits backfill payload', issues: body.error.issues });
-    const result = await runBitsBackfill(options.db, options.config, authenticatedApp, body.data);
-    if (!result.ok) return reply.code(result.statusCode).send({ error: result.error, run: 'run' in result ? result.run : undefined });
-    return { run: result.run, leaderboard: result.leaderboard.ok ? result.leaderboard.leaderboard : [] };
   });
 
   app.get('/api/v1/bits/leaderboard', { preHandler: appAuthenticationMiddleware(options) }, async (request, reply) => {

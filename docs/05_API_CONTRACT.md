@@ -76,9 +76,7 @@ Redemption status updates accept `FULFILLED` or `CANCELED`. The gateway never au
 ### Subscriptions and Bits
 
 ```text
-POST /api/v1/subscriptions/backfill
 GET  /api/v1/subscriptions
-POST /api/v1/bits/backfill
 GET  /api/v1/bits/leaderboard
 ```
 
