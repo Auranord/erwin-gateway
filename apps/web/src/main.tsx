@@ -218,6 +218,9 @@ function App() {
   const [channelPointRewards, setChannelPointRewards] = useState<ChannelPointReward[]>([]);
   const [showDeletedChannelPointRewards, setShowDeletedChannelPointRewards] = useState(false);
   const [channelPointRedemptions, setChannelPointRedemptions] = useState<ChannelPointRedemption[]>([]);
+  const [redemptionSearch, setRedemptionSearch] = useState('');
+  const [redemptionLimit, setRedemptionLimit] = useState(50);
+  const [redemptionsLoaded, setRedemptionsLoaded] = useState(false);
   const [channelPointDiagnostics, setChannelPointDiagnostics] = useState<ChannelPointDiagnostics | null>(null);
   const [channelPointRewardSyncRun, setChannelPointRewardSyncRun] = useState<ChannelPointRewardSyncRun | null>(null);
   const [commandForm, setCommandForm] = useState({ command: '', aliases: '', responseText: '', enabled: true, requiredRole: 'everyone', cooldownSeconds: 30, userCooldownSeconds: 120, replyMode: 'message' });
@@ -384,15 +387,21 @@ function App() {
     setTextCommands(payload.commands ?? []);
   }
 
-  async function loadChannelPoints(includeDeleted = showDeletedChannelPointRewards) {
-    const params = new URLSearchParams();
+  async function loadChannelPoints(includeDeleted = showDeletedChannelPointRewards, search = redemptionSearch, redemptionResultLimit = redemptionLimit, markRedemptionsLoaded = false) {
+    const normalizedRedemptionLimit = Number.isFinite(redemptionResultLimit) ? Math.max(1, Math.trunc(redemptionResultLimit)) : 50;
+    setRedemptionLimit(normalizedRedemptionLimit);
+    const params = new URLSearchParams({ redemptionLimit: String(normalizedRedemptionLimit) });
     if (includeDeleted) params.set('includeDeleted', 'true');
+    if (search) params.set('redemptionQ', search);
     const queryString = params.toString();
     const response = await fetch(`/api/admin/channel-points${queryString ? `?${queryString}` : ''}`, { headers: adminHeaders() });
     if (!response.ok) throw new Error(`Channel Points API returned ${response.status}`);
     const payload = await response.json();
     setChannelPointRewards(payload.rewards ?? []);
-    setChannelPointRedemptions(payload.redemptions ?? []);
+    if (markRedemptionsLoaded) {
+      setChannelPointRedemptions(payload.redemptions ?? []);
+      setRedemptionsLoaded(true);
+    }
     setChannelPointDiagnostics(payload.diagnostics ?? null);
   }
 
@@ -701,7 +710,7 @@ function App() {
     return (
       <main className="shell">
         <form className="admin-auth page-card" aria-label="Admin API key" onSubmit={(event) => { event.preventDefault(); void validateAdminKey(); }}>
-          <label>Admin API key (stored locally in this browser)
+          <label>Admin API key
             <input type="password" value={adminKey} onChange={(event) => saveAdminKey(event.target.value)} placeholder="Required when INTERNAL_ADMIN_API_KEY is configured" />
           </label>
           <button type="submit" disabled={adminAuthStatus === 'validating'}>{adminAuthStatus === 'validating' ? 'Validating…' : 'Validate key'}</button>
@@ -724,15 +733,14 @@ function App() {
 
       <section className="content">
         <header className="hero" id="dashboard">
-          <p className="eyebrow">Phase 7 simple text commands</p>
-          <h1>Admin operations</h1>
+          <h1>Erwin Gateway</h1>
           <p>
             Connect Twitch accounts, manage downstream apps, and own safe static chat responses such as !dc without moving music-domain commands into the gateway.
           </p>
         </header>
 
         <form className="admin-auth page-card" aria-label="Admin API key" onSubmit={(event) => { event.preventDefault(); void validateAdminKey(); }}>
-          <label>Admin API key (stored locally in this browser)
+          <label>Admin API key
             <input type="password" value={adminKey} onChange={(event) => saveAdminKey(event.target.value)} placeholder="Required when INTERNAL_ADMIN_API_KEY is configured" />
           </label>
           <button type="submit">Validate key</button>
@@ -805,16 +813,11 @@ function App() {
             <label>Name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Example: Erwin Hatchery" /></label>
             <label>Slug<input required value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="Example: erwin-hatchery" /></label>
             <label>Description<input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Example: Hatchery reward integration" /></label>
-            <p className="form-help">Create the app first, then assign permissions with the Edit controls.</p>
-            <label>Webhook URL placeholder<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="Example: https://app.example/webhooks/erwin" /></label>
+            <label>Webhook URL<input value={form.webhookUrl} onChange={(event) => setForm({ ...form, webhookUrl: event.target.value })} placeholder="Example: https://app.example/webhooks/erwin" /></label>
             <label>Webhook event filters<input value={form.webhookEventFilters} onChange={(event) => setForm({ ...form, webhookEventFilters: event.target.value })} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
             <button type="submit">Create app</button>
           </form>
 
-          <div className="permission-bank">
-            <strong>Available permissions</strong>
-            <div>{permissions.map((permission) => <code key={permission}>{permission}</code>)}</div>
-          </div>
 
           <div className="app-list">
             {visibleApps.map((registeredApp) => {
@@ -850,7 +853,7 @@ function App() {
                         <label>Name<input value={editForm.name} onChange={(event) => updateAppEditField(registeredApp.id, 'name', event.target.value)} /></label>
                         <label>Slug<input value={editForm.slug} onChange={(event) => updateAppEditField(registeredApp.id, 'slug', event.target.value)} /></label>
                         <label>Description<input value={editForm.description} onChange={(event) => updateAppEditField(registeredApp.id, 'description', event.target.value)} /></label>
-                        <label>Webhook URL placeholder<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="Example: https://app.example/webhooks/erwin" /></label>
+                        <label>Webhook URL<input value={editForm.webhookUrl} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookUrl', event.target.value)} placeholder="Example: https://app.example/webhooks/erwin" /></label>
                         <label>Webhook event filters<input value={editForm.webhookEventFilters} onChange={(event) => updateAppEditField(registeredApp.id, 'webhookEventFilters', event.target.value)} placeholder="Example: twitch.chat.message,twitch.channel_points.custom_reward_redemption.add,twitch.*,*" /></label>
                       </div>
                       <fieldset className="permission-picker">
@@ -873,7 +876,7 @@ function App() {
                       )}
 
                       <div className="webhook-summary">
-                        <p><strong>Webhook URL placeholder:</strong> {registeredApp.webhook.url || 'Not configured'}</p>
+                        <p><strong>Webhook URL:</strong> {registeredApp.webhook.url || 'Not configured'}</p>
                         <p><strong>Event filters:</strong> {registeredApp.webhook.eventFilters.length > 0 ? registeredApp.webhook.eventFilters.join(', ') : 'All deliverable events'}</p>
                       </div>
                     </>
@@ -890,14 +893,14 @@ function App() {
                     <button onClick={() => void generateKey(registeredApp).catch((keyError) => setError(String(keyError)))}>Generate API key</button>
                   </div>
                   <div className="key-list">
-                    {registeredApp.apiKeys.map((key) => (
+                    {registeredApp.apiKeys.filter((key) => !key.revokedAt).map((key) => (
                       <div className={key.revokedAt ? 'key revoked' : 'key'} key={key.id}>
                         <span><strong>{key.name}</strong> <code>{key.keyPrefix}</code></span>
                         <span>last used {key.lastUsedAt ?? 'never'}</span>
                         {key.revokedAt ? <span>revoked</span> : <button onClick={() => void revokeKey(registeredApp, key).catch((revokeError) => setError(String(revokeError)))}>Revoke</button>}
                       </div>
                     ))}
-                    {registeredApp.apiKeys.length === 0 ? <p>No API keys yet.</p> : null}
+                    {registeredApp.apiKeys.filter((key) => !key.revokedAt).length === 0 ? <p>No API keys yet.</p> : null}
                   </div>
                 </article>
               );
@@ -911,7 +914,7 @@ function App() {
             <div>
               <p className="eyebrow">Gateway-owned static replies</p>
               <h2>Text Commands</h2>
-              <p>Static text only. Safe placeholders: <code>{'{user}'}</code>, <code>{'{displayName}'}</code>, <code>{'{channel}'}</code>.</p>
+              <p>Available placeholders: <code>{'{user}'}</code>, <code>{'{displayName}'}</code>, <code>{'{channel}'}</code>.</p>
             </div>
             <button onClick={() => { void loadCommandPrefix().catch((loadError) => setError(String(loadError))); void loadTextCommands().catch((loadError) => setError(String(loadError))); }}>Refresh commands</button>
           </div>
@@ -968,7 +971,6 @@ function App() {
             <div>
               <p className="eyebrow">Downstream app testing</p>
               <h2>Debug Events</h2>
-              <p>Create synthetic Twitch-style events and deliver them to registered app webhooks using the same filters, permissions, signing, and delivery queue as live events.</p>
             </div>
           </div>
 
@@ -983,7 +985,6 @@ function App() {
             <button type="submit">Send debug event</button>
           </form>
           {debugEventResult ? <p className="success">{debugEventResult}</p> : null}
-          <p className="empty-state">Tip: apps must be enabled, have a webhook URL, match the event filter, and hold the matching permission such as <code>subscriptions:read</code>, <code>bits:read</code>, or <code>events:receive_twitch_events</code>.</p>
         </section>
 
         <section className="page-card twitch-panel" id="diagnostics">
@@ -1140,7 +1141,6 @@ function App() {
             <div>
               <p className="eyebrow">Hatchery MVP rewards</p>
               <h2>Channel Points</h2>
-              <p>Reward management uses the broadcaster user token with <code>channel:manage:redemptions</code>; Hatchery keeps economy logic.</p>
             </div>
             <div className="button-row">
               <button onClick={() => void syncChannelPoints().catch((syncError) => setError(String(syncError)))}>Sync from Twitch</button>
@@ -1157,15 +1157,8 @@ function App() {
             </div>
           ) : null}
 
-          <div className="notice-card">
-            <strong>Reward creation lives in downstream apps.</strong>
-            <p>Use this admin view to sync, inspect, enable, disable, or delete rewards. Apps that own reward behavior should create custom rewards through the app API with their own API keys.</p>
-          </div>
 
           <div className="stats-grid">
-            <article><h3>Missing scope</h3><p>{channelPointDiagnostics?.missingChannelManageRedemptions ? 'channel:manage:redemptions missing' : 'OK'}</p></article>
-            <article><h3>Last sync</h3><p>{JSON.stringify(channelPointDiagnostics?.lastRewardSync ?? null)}</p></article>
-            <article><h3>Last redemption</h3><p>{JSON.stringify(channelPointDiagnostics?.lastRedemptionEvent ?? null)}</p></article>
             <article><h3>Missing ownership</h3><p>{channelPointDiagnostics?.twitchRewardsMissingOwnershipMapping ?? 0}</p></article>
             <article><h3>Missing on Twitch</h3><p>{channelPointDiagnostics?.rewardsMissingOnTwitch ?? 0}</p></article>
           </div>
@@ -1185,7 +1178,20 @@ function App() {
             {channelPointRewards.length === 0 ? <p>No Channel Point rewards have been synced yet.</p> : null}
           </div>
 
-          <h3>Recent redemptions</h3>
+          <div className="section-heading compact-heading">
+            <div>
+              <h3>Recent redemptions</h3>
+            </div>
+            <form className="button-row" onSubmit={(event) => { event.preventDefault(); void loadChannelPoints(showDeletedChannelPointRewards, redemptionSearch, redemptionLimit, true).catch((loadError) => setError(String(loadError))); }}>
+              <label>Search text
+                <input placeholder="Optional redemption text" value={redemptionSearch} onChange={(event) => setRedemptionSearch(event.target.value)} />
+              </label>
+              <label>Limit
+                <input type="number" min="1" max="500" value={redemptionLimit} onChange={(event) => setRedemptionLimit(Number.isNaN(event.target.valueAsNumber) ? 1 : event.target.valueAsNumber)} />
+              </label>
+              <button type="submit">Load redemptions</button>
+            </form>
+          </div>
           <div className="table-list">
             {channelPointRedemptions.map((redemption) => (
               <article className="delivery-row" key={redemption.id}>
@@ -1195,7 +1201,7 @@ function App() {
                 <div className="chips"><span>gateway event {redemption.eventId ?? 'pending'}</span><span>delivery visible in Webhook Deliveries</span></div>
               </article>
             ))}
-            {channelPointRedemptions.length === 0 ? <p>No redemptions recorded yet.</p> : null}
+            {channelPointRedemptions.length === 0 ? <p>{redemptionsLoaded ? 'No redemptions match the current filters.' : 'Choose filters and load redemptions.'}</p> : null}
           </div>
         </section>
 

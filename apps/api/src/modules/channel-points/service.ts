@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
 import type { AppConfig } from '../../config/env.js';
 import type { Database } from '../../db/client.js';
 import { adminAuditLog, appChannelPointRewardBindings, events, rewardSyncRuns, twitchChannelPointRedemptions, twitchChannelPointRewards, twitchChannels, twitchEventsubMessages } from '../../db/schema.js';
@@ -162,9 +162,21 @@ export async function releaseReward(db: Database, app: AppIdentity, rewardId: st
   await db.insert(adminAuditLog).values({ action: 'channel_points.reward.release', targetType: 'channel_point_reward', targetId: reward.id, metadata: { appId: app.id, appSlug: app.slug, previousOwningAppId: reward.owningAppId, previousAppOwnershipKey: reward.appOwnershipKey } });
   return { ok: true as const, reward: serializeRewardForApp(updated!, app) };
 }
-export async function listRedemptions(db: Database, app: AppIdentity, query: { rewardId?: string; status?: string; limit?: number }) {
+export async function listRedemptions(db: Database, app: AppIdentity, query: { rewardId?: string; status?: string; q?: string; limit?: number }) {
   const denied = requirePermission(app, 'channel_points:redemptions:read'); if (denied) return denied;
-  const clauses = []; if (query.rewardId) clauses.push(eq(twitchChannelPointRedemptions.rewardId, query.rewardId)); if (query.status) clauses.push(eq(twitchChannelPointRedemptions.status, query.status));
+  const clauses = [];
+  if (query.rewardId) clauses.push(eq(twitchChannelPointRedemptions.rewardId, query.rewardId));
+  if (query.status) clauses.push(eq(twitchChannelPointRedemptions.status, query.status));
+  if (query.q) {
+    const pattern = `%${query.q}%`;
+    clauses.push(or(
+      ilike(twitchChannelPointRedemptions.userLogin, pattern),
+      ilike(twitchChannelPointRedemptions.userDisplayName, pattern),
+      ilike(twitchChannelPointRedemptions.userInput, pattern),
+      ilike(twitchChannelPointRedemptions.twitchRewardId, pattern),
+      ilike(twitchChannelPointRedemptions.twitchRedemptionId, pattern)
+    ));
+  }
   return { ok: true as const, redemptions: await db.select().from(twitchChannelPointRedemptions).where(clauses.length ? and(...clauses) : undefined).orderBy(desc(twitchChannelPointRedemptions.redeemedAt)).limit(Math.min(query.limit ?? 100, 500)) };
 }
 export async function fetchRedemptionsFromTwitch(db: Database, config: AppConfig, app: AppIdentity, rewardId: string, status?: string) {
